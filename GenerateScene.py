@@ -56,8 +56,8 @@ class GenerateScene:
         # Encroaching Vehicle in opposite lane
         POVState = lgsvl.AgentState()
         POVState.transform.position = lgsvl.Vector(self.EGO_start.x  - INITIAL_HEADWAY,
-        											self.EGO_start.y,
-        											1.0)
+        self.EGO_start.y,
+        1.0)
         POVState.transform.rotation = lgsvl.Vector(0, 90, 0)
         # Vehicles: DeliveryTruck, Hatchback, Jeep, Sedan, SchoolBus, SUV
         self.POV = self.sim.add_agent("Jeep", lgsvl.AgentType.NPC, POVState)
@@ -79,30 +79,48 @@ class GenerateScene:
         self.POVWaypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(nx+65, ny, nz+20), npcSpeed))
 
 
-    # def on_collision(self, agent1, agent2, contact):
-    #     raise evaluator.TestException("Colision between EGO and POV")
+    def on_collision(self, agent1, agent2, contact):
+        raise evaluator.TestException("Colision between EGO and POV")
 
     def save_camera_image(self, timestep):
-        for s in self.sensors:
+        for s in sensors:
             if s.name == "Main Camera":
-                # s.save(IMAGE_PATH + "/waypoints/" + str(timestep) + "main-camera.jpg", quality=75)
-                s.save(IMAGE_PATH + "/training/" + str(timestep) + "main-camera.jpg", quality=75)
+                s.save(IMAGE_PATH + "/waypoints/" + str(timestep) + "main-camera.jpg", quality=75)
+                # s.save(IMAGE_PATH + "/training/" + str(timestep) + "main-camera.jpg", quality=75)
                 print("image saved")
                 break
 
+    def get_EGO_state(self, egoState):
+        # Return the position, rotation, and speed of EGO
+        return egoState.position, egoState.rotation, egoState.speed
+
+    def get_EGO_control(self, egoControl):
+        return egoControl.steering, egoControl.throttle, egoControl.braking, egoControl.turn_signal_right
+
+    def log(self):
+        print(time.time())
+        print("Position : ", p)
+        print("Rotation ", r)
+        print("Speed ", s)
+        print("Steering ", ste)
+        print("Throttle ", thr)
+        print("Braking ", bra)
+        print("Right signal", tsr, "\n")
+
     def run(self):
-        # self.ego.on_collision(self.on_collision)
-        # self.POV.on_collision(self.on_collision)
+        self.ego.on_collision(self.on_collision)
+        self.POV.on_collision(self.on_collision)
 
         try:
             t0 = time.time()
             self.sim.run(TIME_DELAY)
             self.POV.follow(self.POVWaypoints)
 
-        	# Speed check for ego and POV
+        # Speed check for ego and POV
             timestep = 0
             while True:
                 egoCurrentState = self.ego.state
+               
                 if egoCurrentState.speed > MAX_SPEED + SPEED_VARIANCE:
                     raise evaluator.TestException("Ego speed exceeded limit, {} > {} m/s".format(egoCurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
 
@@ -111,7 +129,11 @@ class GenerateScene:
                     raise evaluator.TestException("POV1 speed exceeded limit, {} > {} m/s".format(POVCurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
 
                 self.sim.run(1)
-                self.save_camera_image(timestep)
+                # self.save_camera_image(timestep)
+                pos, rot, spd = self.get_EGO_state(egoCurrentState)
+                ste, thr, bra, tsr = self.get_EGO_control(lgsvl.VehicleControl())
+                
+                self.log()
 
                 if time.time() - t0 > TIME_LIMIT:
                     break
@@ -127,4 +149,4 @@ if __name__ == "__main__":
     scene = GenerateScene()
     scene.generate_EGO()
     scene.generate_POV()
-    scene.run()
+    # scene.run()
