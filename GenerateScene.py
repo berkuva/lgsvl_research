@@ -79,16 +79,16 @@ class GenerateScene:
         self.POVWaypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(nx+65, ny, nz+20), npcSpeed))
 
 
-    def on_collision(self, agent1, agent2, contact):
-        raise evaluator.TestException("Colision between EGO and POV")
+    # def on_collision(self, agent1, agent2, contact):
+    #     raise evaluator.TestException("Colision between EGO and POV")
 
-    def save_camera_image(self, timestep):
-        for s in sensors:
-            if s.name == "Main Camera":
-                s.save(IMAGE_PATH + "/waypoints/" + str(timestep) + "main-camera.jpg", quality=75)
-                # s.save(IMAGE_PATH + "/training/" + str(timestep) + "main-camera.jpg", quality=75)
-                print("image saved")
-                break
+    # def save_camera_image(self, timestep):
+    #     for s in sensors:
+    #         if s.name == "Main Camera":
+    #             s.save(IMAGE_PATH + "/waypoints/" + str(timestep) + "main-camera.jpg", quality=75)
+    #             # s.save(IMAGE_PATH + "/training/" + str(timestep) + "main-camera.jpg", quality=75)
+    #             print("image saved")
+    #             break
 
     def get_EGO_state(self, egoState):
         # Return the position, rotation, and speed of EGO
@@ -97,53 +97,59 @@ class GenerateScene:
     def get_EGO_control(self, egoControl):
         return egoControl.steering, egoControl.throttle, egoControl.braking, egoControl.turn_signal_right
 
-    def log(self):
-        print(time.time())
-        print("Position : ", p)
-        print("Rotation ", r)
-        print("Speed ", s)
-        print("Steering ", ste)
-        print("Throttle ", thr)
-        print("Braking ", bra)
-        print("Right signal", tsr, "\n")
+    # def log(self, state_tuple, control_tuple):
+    #     print(time.time())
 
-    def run(self):
-        self.ego.on_collision(self.on_collision)
-        self.POV.on_collision(self.on_collision)
+    #     position, rotation, speed = state_tuple
+        
+    #     print("Position : ", position)
+    #     print("Rotation ", rotation)
+    #     print("Speed ", speed)
 
-        try:
-            t0 = time.time()
-            self.sim.run(TIME_DELAY)
-            self.POV.follow(self.POVWaypoints)
+    #     steering, throttle, braking, turn_signal_right = control_tuple
 
-        # Speed check for ego and POV
-            timestep = 0
-            while True:
-                egoCurrentState = self.ego.state
+    #     print("Steering ", steering)
+    #     print("Throttle ", throttle)
+    #     print("Braking ", braking)
+    #     print("Right signal", turn_signal_right, "\n")
+
+    # def run(self):
+    #     self.ego.on_collision(self.on_collision)
+    #     self.POV.on_collision(self.on_collision)
+
+    #     try:
+    #         t0 = time.time()
+    #         self.sim.run(TIME_DELAY)
+    #         self.POV.follow(self.POVWaypoints)
+
+    #     # Speed check for ego and POV
+    #         timestep = 0
+    #         while True:
+    #             egoCurrentState = self.ego.state
                
-                if egoCurrentState.speed > MAX_SPEED + SPEED_VARIANCE:
-                    raise evaluator.TestException("Ego speed exceeded limit, {} > {} m/s".format(egoCurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
+    #             if egoCurrentState.speed > MAX_SPEED + SPEED_VARIANCE:
+    #                 raise evaluator.TestException("Ego speed exceeded limit, {} > {} m/s".format(egoCurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
 
-                POVCurrentState = self.POV.state
-                if POVCurrentState.speed > MAX_SPEED + SPEED_VARIANCE:
-                    raise evaluator.TestException("POV1 speed exceeded limit, {} > {} m/s".format(POVCurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
+    #             POVCurrentState = self.POV.state
+    #             if POVCurrentState.speed > MAX_SPEED + SPEED_VARIANCE:
+    #                 raise evaluator.TestException("POV1 speed exceeded limit, {} > {} m/s".format(POVCurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
 
-                self.sim.run(1)
-                # self.save_camera_image(timestep)
-                pos, rot, spd = self.get_EGO_state(egoCurrentState)
-                ste, thr, bra, tsr = self.get_EGO_control(lgsvl.VehicleControl())
+    #             self.sim.run(1)
+    #             # self.save_camera_image(timestep)
+    #             pos, rot, spd = self.get_EGO_state(egoCurrentState)
+    #             ste, thr, bra, tsr = self.get_EGO_control(lgsvl.VehicleControl())
                 
-                self.log()
+    #             self.log((pos, rot, spd), (ste, thr, bra, tsr))
 
-                if time.time() - t0 > TIME_LIMIT:
-                    break
+    #             if time.time() - t0 > TIME_LIMIT:
+    #                 break
 
-                timestep += 1
-        except evaluator.TestException as e:
-            print("FAILED: " + repr(e))
-            exit()
+    #             timestep += 1
+    #     except evaluator.TestException as e:
+    #         print("FAILED: " + repr(e))
+    #         exit()
 
-        print("Program Terminated")
+    #     print("Program Terminated")
 
 if __name__ == "__main__":
     scene = GenerateScene()

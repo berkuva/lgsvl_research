@@ -12,6 +12,11 @@ from torch.distributions import Categorical
 from GenerateScene import GenerateScene
 
 
+import pdb
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 parser = argparse.ArgumentParser(description='actor-critic for Apollo')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
                     help='discount factor (default: 0.99)')
@@ -40,13 +45,13 @@ class Policy(nn.Module):
     """
     def __init__(self):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(4, NUM_NODES)
+        self.affine1 = nn.Linear(7, NUM_NODES)
 
         # actor's layer
         self.action_head = nn.Linear(NUM_NODES, NUM_ACTIONS)
 
         # critic's layer
-        self.value_head = nn.Linear(128, 1)
+        self.value_head = nn.Linear(NUM_NODES, 1)
 
         # action & reward buffer
         self.saved_actions = []
@@ -64,6 +69,7 @@ class Policy(nn.Module):
         action_prob = F.softmax(self.action_head(x), dim=-1)
 
         # critic: evaluates being in the state s_t
+        # pdb.set_trace()
         state_values = self.value_head(x)
 
         # return values for both actor and critic as a tupel of 2 values:
@@ -136,11 +142,11 @@ def finish_episode():
     del model.rewards[:]
     del model.saved_actions[:]
 
-
+# Returns position, rotation, speed of EGO at start
 def reset_sim(scene):
     scene.generate_EGO()
     scene.generate_POV()
-    return np.array([scene.get_Ego_state(scene.ego.state)])
+    return scene.get_EGO_state(scene.ego.state)
 
 
 def on_collision(agent1, agent2, contact):
@@ -154,40 +160,37 @@ def save_camera_image(timestep):
             print("image saved")
             break
 
-def get_EGO_state(egoState):
-    # Return the position, rotation, and speed of EGO
-    return egoState.position, egoState.rotation, egoState.speed
+def log(state_tuple, control_tuple):
+    print(time.time())
 
-def get_EGO_control(egoControl):
-    return egoControl.steering, egoControl.throttle, egoControl.braking, egoControl.turn_signal_right
+    position, rotation, speed = state_tuple
+    
+    print("Position : ", position)
+    print("Rotation ", rotation)
+    print("Speed ", speed)
 
-def log():
-        print(time.time())
-    print("Position : ", p)
-    print("Rotation ", r)
-    print("Speed ", s)
-    print("Steering ", ste)
-    print("Throttle ", thr)
-    print("Braking ", bra)
-    print("Right signal", tsr, "\n")
+    steering, throttle, braking, turn_signal_right = control_tuple
 
+    print("Steering ", steering)
+    print("Throttle ", throttle)
+    print("Braking ", braking)
+    print("Right signal", turn_signal_right, "\n")
 
+# Generate an action in simulator
 def step(action, ego, POV, sim, POVWaypoints):
-        # Generate an action in simulator
-        print("Stepping..")
+    print("Stepping..")
 
-        if action == 0:
-                set_ego_state()
-                pass
+    if action == 0:
+        set_ego_state()
+        pass
 
-        elif action == 1:
-                set_ego_state()
-                pass
+    elif action == 1:
+        set_ego_state()
+        pass
 
-        elif action == 2:
-                set_ego_state()
-                pass
-
+    elif action == 2:
+        set_ego_state()
+        pass
 
     ego.on_collision(on_collision)
     POV.on_collision(on_collision)
@@ -205,11 +208,11 @@ def step(action, ego, POV, sim, POVWaypoints):
     pos, rot, spd = get_EGO_state(egoCurrentState)
     ste, thr, bra, tsr = get_EGO_control(lgsvl.VehicleControl())
 
-    log()
+    log((pos, rot, spd), (ste, thr, bra, tsr))
 
-    if time.time() - t0 > TIME_LIMIT:
-        break
 
+    # if time.time() - t0 > TIME_LIMIT:
+    #     break
 
     return state, reward, done, info
 
@@ -224,7 +227,14 @@ def main():
         scene = GenerateScene()
 
         # reset environment and episode reward
-        state = env.reset_sim(scene)
+        
+        state = reset_sim(scene)
+        position = state[0]
+        rotation = state[1]
+        speed = state[2]
+
+        state = np.array((position.x, position.y, position.z, rotation.x, rotation.y, rotation.z, speed))
+        # pdb.set_trace()
         POVWaypoints = scene.POVWaypoints
 
         ep_reward = 0
@@ -238,7 +248,6 @@ def main():
 
             # take the action
             state, reward, done, _ = step(action)
-
 
             model.rewards.append(reward)
             ep_reward += reward
