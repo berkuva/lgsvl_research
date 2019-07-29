@@ -5,6 +5,7 @@ import time
 import math
 import evaluator
 
+from collections import namedtuple
 
 MAX_SPEED = 10
 INITIAL_HEADWAY = 90
@@ -36,16 +37,12 @@ class GenerateScene:
         egoState.transform = self.sim.map_point_on_lane(self.EGO_start)
         egoState.velocity = lgsvl.Vector(-5, 0, 0)
 
-        egoControl = lgsvl.VehicleControl()
-        egoControl.turn_signal_right = True
-
         self.ego = self.sim.add_agent("XE_Rigged-apollo_3_5", lgsvl.AgentType.EGO, egoState)
-        self.ego.apply_control(egoControl)
 
         # enable sensors required for Apollo 3.5
-        self.sensors = self.ego.get_sensors()
+        sensors = self.ego.get_sensors()
 
-        for s in self.sensors:
+        for s in sensors:
             if s.name in ['velodyne', 'Main Camera', 'Telephoto Camera', 'GPS', 'IMU']:
                 s.enabled = True
 
@@ -96,6 +93,21 @@ class GenerateScene:
 
     def get_EGO_control(self, egoControl):
         return egoControl.steering, egoControl.throttle, egoControl.braking, egoControl.turn_signal_right
+
+    def set_EGO_state(self, egoState):
+        self.ego.state(egoState)
+
+    def set_EGO_control(self, namedTupleControl):
+        egoControl = lgsvl.VehicleControl()
+
+        egoControl.steering = namedTupleControl.control
+        egoControl.throttle = namedTupleControl.throttle
+        egoControl.braking = namedTupleControl.braking
+
+        egoControl.turn_signal_right = namedTupleControl.turn_signal_right
+
+        self.ego.apply_control(egoControl)
+
 
     # def log(self, state_tuple, control_tuple):
     #     print(time.time())

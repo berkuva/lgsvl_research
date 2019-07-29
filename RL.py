@@ -11,7 +11,6 @@ from torch.distributions import Categorical
 
 from GenerateScene import GenerateScene
 
-
 import pdb
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -32,6 +31,17 @@ torch.manual_seed(args.seed)
 
 namedtuple('SavedAction', ['log_prob', 'value'])
 
+# Initialize control varibles
+INITIAL_STEERING = 
+INITIAL_THROTTLE = 
+INITIAL_BRAKING = 
+INITIAL_TURN_SIGNAL_RIGHT = 
+
+namedtuple('Control', ['steering', 'throttle', "braking", "turn_signal_right"])
+control_tuple = Control(INITIAL_STEERING,
+                    INITIAL_THROTTLE,
+                    INITIAL_BRAKING,
+                    INITIAL_TURN_SIGNAL_RIGHT)
 
 NUM_NODES = 128
 NUM_PARAMS = 3 # position, rotation, speed
@@ -160,7 +170,7 @@ def save_camera_image(timestep):
             print("image saved")
             break
 
-def log(state_tuple, control_tuple):
+def log(state_tuple, controlTuple):
     print(time.time())
 
     position, rotation, speed = state_tuple
@@ -169,50 +179,40 @@ def log(state_tuple, control_tuple):
     print("Rotation ", rotation)
     print("Speed ", speed)
 
-    steering, throttle, braking, turn_signal_right = control_tuple
+    steering, throttle, braking, turn_signal_right = controlTuple
 
     print("Steering ", steering)
     print("Throttle ", throttle)
     print("Braking ", braking)
     print("Right signal", turn_signal_right, "\n")
 
+# update the namedtuple control according to the action
+def check_action(action):
+    control_tuple[action] =
+
+
 # Generate an action in simulator
-def step(action, ego, POV, sim, POVWaypoints):
+def step(ego, POV, sim, control, scene):
     print("Stepping..")
 
-    if action == 0:
-        set_ego_state()
-        pass
+    done = False
 
-    elif action == 1:
-        set_ego_state()
-        pass
+    info = ego.on_collision(on_collision)
 
-    elif action == 2:
-        set_ego_state()
-        pass
+    if info != None
+        done = True
+        
+    else:
+        egoCurrentState = ego.state
 
-    ego.on_collision(on_collision)
-    POV.on_collision(on_collision)
+        pos, rot, spd = scene.get_EGO_state(egoCurrentState)
+        ste, thr, bra, tsr = scene.get_EGO_control(lgsvl.VehicleControl())
 
-    t0 = time.time()
-    POV.follow(POVWaypoints)
-
-    timestep = 0
-
-    egoCurrentState = ego.state
-
-    sim.run(1)
-
-    save_camera_image(timestep)
-    pos, rot, spd = get_EGO_state(egoCurrentState)
-    ste, thr, bra, tsr = get_EGO_control(lgsvl.VehicleControl())
-
-    log((pos, rot, spd), (ste, thr, bra, tsr))
+        scene.set_EGO_control(control)
+        sim.run(1)
 
 
-    # if time.time() - t0 > TIME_LIMIT:
-    #     break
+        log((pos, rot, spd), (ste, thr, bra, tsr))
 
     return state, reward, done, info
 
@@ -233,8 +233,16 @@ def main():
         rotation = state[1]
         speed = state[2]
 
-        state = np.array((position.x, position.y, position.z, rotation.x, rotation.y, rotation.z, speed))
-        # pdb.set_trace()
+
+        state = np.array((position.x,
+                            position.y,
+                            position.z,
+                            rotation.x,
+                            rotation.y,
+                            rotation.z,
+                            speed))
+        
+
         POVWaypoints = scene.POVWaypoints
 
         ep_reward = 0
@@ -246,10 +254,18 @@ def main():
             # select action from policy
             action = select_action(state)
 
+            check_action(action)
+
             # take the action
-            state, reward, done, _ = step(action)
+            state, reward, done, _ = step(scene.ego,
+                                            scene.POV,
+                                            control_tuple,
+                                            scene)
+            # Set the scene according to state
+            scene.set_EGO_state(state)
 
             model.rewards.append(reward)
+
             ep_reward += reward
 
             if done:
