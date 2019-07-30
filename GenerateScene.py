@@ -89,18 +89,20 @@ class GenerateScene:
 
     def get_EGO_state(self, egoState):
         # Return the position, rotation, and speed of EGO
-        return egoState.position, egoState.rotation, egoState.speed
+        return egoState.position, egoState.rotation, egoState.velocity
 
     def get_EGO_control(self, egoControl):
         return egoControl.steering, egoControl.throttle, egoControl.braking, egoControl.turn_signal_right
 
     def set_EGO_state(self, egoState):
-        self.ego.state(egoState)
+        self.ego.state.transform.position = lgsvl.Vector(egoState[0], egoState[1], egoState[2])
+        self.ego.state.transform.rotation = lgsvl.Vector(egoState[3], egoState[4], egoState[5])
+        self.ego.state.velocity = lgsvl.Vector(egoState[6], egoState[7], egoState[8])
 
     def set_EGO_control(self, namedTupleControl):
         egoControl = lgsvl.VehicleControl()
 
-        egoControl.steering = namedTupleControl.control
+        egoControl.steering = namedTupleControl.steering
         egoControl.throttle = namedTupleControl.throttle
         egoControl.braking = namedTupleControl.braking
 

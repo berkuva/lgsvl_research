@@ -1,7 +1,10 @@
+import lgsvl
+
 import argparse
 import numpy as np
 from itertools import count
 from collections import namedtuple
+import time
 
 import torch
 import torch.nn as nn
@@ -29,19 +32,20 @@ args = parser.parse_args()
 
 torch.manual_seed(args.seed)
 
-namedtuple('SavedAction', ['log_prob', 'value'])
+SavedAction = namedtuple('SavedAction', ['log_prob', 'value'])
 
 # Initialize control varibles
-INITIAL_STEERING = 
-INITIAL_THROTTLE = 
-INITIAL_BRAKING = 
-INITIAL_TURN_SIGNAL_RIGHT = 
+INITIAL_STEERING = 0.0
+INITIAL_THROTTLE = 0.0
+INITIAL_BRAKING = 0.0
+INITIAL_TURN_SIGNAL_RIGHT = False #bool
 
-namedtuple('Control', ['steering', 'throttle', "braking", "turn_signal_right"])
+Control = namedtuple('Control', ['steering', 'throttle', "braking", "turn_signal_right"])
 control_tuple = Control(INITIAL_STEERING,
                     INITIAL_THROTTLE,
                     INITIAL_BRAKING,
                     INITIAL_TURN_SIGNAL_RIGHT)
+
 
 NUM_NODES = 128
 NUM_PARAMS = 3 # position, rotation, speed
@@ -55,7 +59,7 @@ class Policy(nn.Module):
     """
     def __init__(self):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(7, NUM_NODES)
+        self.affine1 = nn.Linear(9, NUM_NODES)
 
         # actor's layer
         self.action_head = nn.Linear(NUM_NODES, NUM_ACTIONS)
@@ -79,7 +83,7 @@ class Policy(nn.Module):
         action_prob = F.softmax(self.action_head(x), dim=-1)
 
         # critic: evaluates being in the state s_t
-        # pdb.set_trace()
+
         state_values = self.value_head(x)
 
         # return values for both actor and critic as a tupel of 2 values:
@@ -173,11 +177,11 @@ def save_camera_image(timestep):
 def log(state_tuple, controlTuple):
     print(time.time())
 
-    position, rotation, speed = state_tuple
+    position, rotation, velocity = state_tuple
     
     print("Position : ", position)
     print("Rotation ", rotation)
-    print("Speed ", speed)
+    print("Velocity ", velocity)
 
     steering, throttle, braking, turn_signal_right = controlTuple
 
@@ -188,7 +192,9 @@ def log(state_tuple, controlTuple):
 
 # update the namedtuple control according to the action
 def check_action(action):
-    control_tuple[action] =
+    pass
+    # pass
+    # control_tuple[action] =
 
 
 # Generate an action in simulator
@@ -197,29 +203,32 @@ def step(ego, POV, sim, control, scene):
 
     done = False
 
+    egoCurrentState = ego.state
+
+    pos, rot, vel = scene.get_EGO_state(egoCurrentState)
+    ste, thr, bra, tsr = scene.get_EGO_control(lgsvl.VehicleControl())
+
+    scene.set_EGO_control(control)
+
+    sim.run(1)
+
+    new_state = np.array([pos.x, pos.y, pos.z, rot.x, rot.y, rot.z, vel.x, vel.y, vel.z])
+
     info = ego.on_collision(on_collision)
 
-    if info != None
+    if info != None: #collision occured
         done = True
-        
+        reward = float('inf')
     else:
-        egoCurrentState = ego.state
+        reward = -10
 
-        pos, rot, spd = scene.get_EGO_state(egoCurrentState)
-        ste, thr, bra, tsr = scene.get_EGO_control(lgsvl.VehicleControl())
+    log((pos, rot, vel), (ste, thr, bra, tsr))
 
-        scene.set_EGO_control(control)
-        sim.run(1)
-
-
-        log((pos, rot, spd), (ste, thr, bra, tsr))
-
-    return state, reward, done, info
-
+    return new_state, reward, done, info
 
 
 def main():
-    running_reward = -10
+    running_reward = 0
 
     # run inifinitely many episodes
     for i_episode in count(1):
@@ -229,10 +238,10 @@ def main():
         # reset environment and episode reward
         
         state = reset_sim(scene)
+
         position = state[0]
         rotation = state[1]
-        speed = state[2]
-
+        velocity = state[2]
 
         state = np.array((position.x,
                             position.y,
@@ -240,9 +249,10 @@ def main():
                             rotation.x,
                             rotation.y,
                             rotation.z,
-                            speed))
+                            velocity.x,
+                            velocity.y,
+                            velocity.z))
         
-
         POVWaypoints = scene.POVWaypoints
 
         ep_reward = 0
@@ -257,10 +267,11 @@ def main():
             check_action(action)
 
             # take the action
-            state, reward, done, _ = step(scene.ego,
-                                            scene.POV,
-                                            control_tuple,
-                                            scene)
+            state, reward, done, info = step(ego=scene.ego,
+                                            POV=scene.POV,
+                                            sim=scene.sim,
+                                            control=control_tuple,
+                                            scene=scene)
             # Set the scene according to state
             scene.set_EGO_state(state)
 
