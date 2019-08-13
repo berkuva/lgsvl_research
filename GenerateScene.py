@@ -4,16 +4,13 @@ import sys
 import time
 import math
 import evaluator
-
-from collections import namedtuple
+import numpy as np
 
 MAX_SPEED = 10
 INITIAL_HEADWAY = 90
-SPEED_VARIANCE = 4
-TIME_LIMIT = 14
-TIME_DELAY = 3
-IMAGE_PATH = "/home/derek/Desktop/simulator/Api/examples/NHTSA-sample-tests/Encroaching-Oncoming-Vehicles/"
-
+SPEED_VARIANCE = 10
+TIME_DELAY = 2
+TIME_LIMIT = 25+TIME_DELAY
 
 class GenerateScene:
     def __init__(self, EGO_start = None):
@@ -27,15 +24,14 @@ class GenerateScene:
             self.sim.load("SanFrancisco")
 
         if EGO_start == None:
-            # spawn EGO at right lane for a right turn
-            self.EGO_start = lgsvl.Vector(-3, 9.9, 8.1)
+            self.EGO_start = lgsvl.Vector(-3.0, 11.9, 8.1)
         else:
             self.EGO_start = EGO_start
 
     def generate_EGO(self):
         egoState = lgsvl.AgentState()
         egoState.transform = self.sim.map_point_on_lane(self.EGO_start)
-        egoState.velocity = lgsvl.Vector(-5, 0, 0)
+        # egoState.velocity = lgsvl.Vector(-5, 0, 0)
 
         self.ego = self.sim.add_agent("XE_Rigged-apollo_3_5", lgsvl.AgentType.EGO, egoState)
 
@@ -49,124 +45,124 @@ class GenerateScene:
         self.ego.connect_bridge(os.environ.get("BRIDGE_HOST", "127.0.0.1"), 9090)
 
 
-    def generate_POV(self):
+    def generate_NPCs(self):
         # Encroaching Vehicle in opposite lane
-        POVState = lgsvl.AgentState()
-        POVState.transform.position = lgsvl.Vector(self.EGO_start.x  - INITIAL_HEADWAY,
-        self.EGO_start.y,
-        1.0)
-        POVState.transform.rotation = lgsvl.Vector(0, 90, 0)
-        # Vehicles: DeliveryTruck, Hatchback, Jeep, Sedan, SchoolBus, SUV
-        self.POV = self.sim.add_agent("Jeep", lgsvl.AgentType.NPC, POVState)
+        npcState = lgsvl.AgentState()
 
-        POVControl = lgsvl.NPCControl()
-        POVControl.turn_signal_left = True
-        self.POV.apply_control(POVControl)
+        x = self.EGO_start.x
+        y = self.EGO_start.y
+        z = self.EGO_start.z
 
-        npcSpeed = 12
-        nx = self.POV.state.position.x
-        ny = self.POV.state.position.y
-        nz = self.POV.state.position.z
+        ##### NPC1 #####
+        npcState.transform = self.sim.map_point_on_lane(lgsvl.Vector(x+7, y, z))
+        self.npc1 = self.sim.add_agent("Sedan", lgsvl.AgentType.NPC, npcState)
 
-        self.POVWaypoints = []
-        self.POVWaypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(nx+35, ny, nz), npcSpeed))
-        self.POVWaypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(nx+50, ny, nz), npcSpeed-5)) # ready for left turn
-        self.POVWaypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(nx+62, ny, nz+5), npcSpeed-5))
-        self.POVWaypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(nx+65, ny, nz+10), npcSpeed-4))
-        self.POVWaypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(nx+65, ny, nz+20), npcSpeed))
+        npc1Speed = 5
 
+        n1x = self.npc1.state.position.x
+        n1y = self.npc1.state.position.y
+        n1z = self.npc1.state.position.z
 
-    # def on_collision(self, agent1, agent2, contact):
-    #     raise evaluator.TestException("Colision between EGO and POV")
-
-    # def save_camera_image(self, timestep):
-    #     for s in sensors:
-    #         if s.name == "Main Camera":
-    #             s.save(IMAGE_PATH + "/waypoints/" + str(timestep) + "main-camera.jpg", quality=75)
-    #             # s.save(IMAGE_PATH + "/training/" + str(timestep) + "main-camera.jpg", quality=75)
-    #             print("image saved")
-    #             break
-
-    def get_EGO_state(self, egoState):
-        # Return the position, rotation, and speed of EGO
-        return egoState.position, egoState.rotation, egoState.velocity
-
-    def get_EGO_control(self, egoControl):
-        return egoControl.steering, egoControl.throttle, egoControl.braking, egoControl.turn_signal_right
-
-    def set_EGO_state(self, egoState):
-        self.ego.state.transform.position = lgsvl.Vector(egoState[0], egoState[1], egoState[2])
-        self.ego.state.transform.rotation = lgsvl.Vector(egoState[3], egoState[4], egoState[5])
-        self.ego.state.velocity = lgsvl.Vector(egoState[6], egoState[7], egoState[8])
-
-    def set_EGO_control(self, namedTupleControl):
-        egoControl = lgsvl.VehicleControl()
-
-        egoControl.steering = namedTupleControl.steering
-        egoControl.throttle = namedTupleControl.throttle
-        egoControl.braking = namedTupleControl.braking
-
-        egoControl.turn_signal_right = namedTupleControl.turn_signal_right
-
-        self.ego.apply_control(egoControl)
+        self.npc1Waypoints = []
+        self.npc1Waypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(n1x-12, n1y, n1z+0.5), npc1Speed))
+        self.npc1Waypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(n1x-14, n1y, n1z+2.5), npc1Speed))
+        self.npc1Waypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(n1x-16, n1y, n1z+6), npc1Speed))
+        self.npc1Waypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(n1x-18, n1y, n1z+9), npc1Speed))
+        self.npc1Waypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(n1x-20, n1y, n1z+13), npc1Speed))
 
 
-    # def log(self, state_tuple, control_tuple):
-    #     print(time.time())
+        ##### NPC2 #####
+        npcState.transform = self.sim.map_point_on_lane(lgsvl.Vector(x-INITIAL_HEADWAY, y, 1.0))
+        npcState.transform.rotation = lgsvl.Vector(0, 90, 0)
+        self.npc2 = self.sim.add_agent("Jeep", lgsvl.AgentType.NPC, npcState)
 
-    #     position, rotation, speed = state_tuple
+        npc2Speed = 12
+
+        n2x = self.npc2.state.position.x
+        n2y = self.npc2.state.position.y
+        n2z = self.npc2.state.position.z
+
+        self.npc2Waypoints = []
+        self.npc2Waypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(n2x+50, n2y, n2z), npc2Speed-5)) # ready for left turn
+        self.npc2Waypoints.append(lgsvl.DriveWaypoint(lgsvl.Vector(n2x+65, n2y, n2z+30), npc2Speed))
         
-    #     print("Position : ", position)
-    #     print("Rotation ", rotation)
-    #     print("Speed ", speed)
+        # pt = self.EGO_start
+        # pt.x += 5
+        # self.npc2Waypoints.append(lgsvl.DriveWaypoint(pt, npc2Speed))
 
-    #     steering, throttle, braking, turn_signal_right = control_tuple
 
-    #     print("Steering ", steering)
-    #     print("Throttle ", throttle)
-    #     print("Braking ", braking)
-    #     print("Right signal", turn_signal_right, "\n")
+    def on_collision(self, agent1, agent2, contact):
+        raise evaluator.TestException("Colision between {} and {}".format(agent1, agent2))
 
-    # def run(self):
-    #     self.ego.on_collision(self.on_collision)
-    #     self.POV.on_collision(self.on_collision)
+    def ttc(self, distance, ttc): #calculate the time to collision between the NPCs
+        approaching = False
+        dist_changed = False
+        
+        dist = abs(math.sqrt( (self.npc1.state.position.x - self.npc2.state.position.x)**2 + \
+                              (self.npc1.state.position.y - self.npc2.state.position.y)**2 + \
+                              (self.npc1.state.position.z - self.npc2.state.position.z)**2))
+        if distance == None:
+            distance = dist
+            approaching = None
+        else:
+            dist_changed = distance - dist
+            distance = dist
+            approaching = dist_changed > 0
+        
 
-    #     try:
-    #         t0 = time.time()
-    #         self.sim.run(TIME_DELAY)
-    #         self.POV.follow(self.POVWaypoints)
+        relative_speed = self.npc2.state.speed - self.npc1.state.speed
+        
+        if approaching == None:
+            ttc = "timestep = 0"
+        elif approaching:
+            ttc = self.npc2.uid.split("(Clone)")[0] + " " + str(np.round(distance / relative_speed, 3)) + " seconds"
+        else:
+            ttc = self.npc2.uid.split("(Clone)")[0] + " is moving away from NPC"
+        print(ttc)
+        return distance, ttc
 
-    #     # Speed check for ego and POV
-    #         timestep = 0
-    #         while True:
-    #             egoCurrentState = self.ego.state
-               
-    #             if egoCurrentState.speed > MAX_SPEED + SPEED_VARIANCE:
-    #                 raise evaluator.TestException("Ego speed exceeded limit, {} > {} m/s".format(egoCurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
+    def run(self):
+        self.ego.on_collision(self.on_collision)
+        self.npc1.on_collision(self.on_collision)
+        self.npc2.on_collision(self.on_collision)
 
-    #             POVCurrentState = self.POV.state
-    #             if POVCurrentState.speed > MAX_SPEED + SPEED_VARIANCE:
-    #                 raise evaluator.TestException("POV1 speed exceeded limit, {} > {} m/s".format(POVCurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
+        try:
+            t0 = time.time()
+            self.sim.run(TIME_DELAY)
+            # self.npc1.follow(self.npc1Waypoints)
+            self.npc2.follow(self.npc2Waypoints)
 
-    #             self.sim.run(1)
-    #             # self.save_camera_image(timestep)
-    #             pos, rot, spd = self.get_EGO_state(egoCurrentState)
-    #             ste, thr, bra, tsr = self.get_EGO_control(lgsvl.VehicleControl())
-                
-    #             self.log((pos, rot, spd), (ste, thr, bra, tsr))
+            distance = None
+            ttc = None
 
-    #             if time.time() - t0 > TIME_LIMIT:
-    #                 break
+            while True:
+                distance, ttc = self.ttc(distance, ttc)
 
-    #             timestep += 1
-    #     except evaluator.TestException as e:
-    #         print("FAILED: " + repr(e))
-    #         exit()
+                egoCurrentState = self.ego.state
+                if egoCurrentState.speed > MAX_SPEED + SPEED_VARIANCE:
+                    raise evaluator.TestException("EGO speed exceeded limit, {} > {} m/s".format(egoCurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
 
-    #     print("Program Terminated")
+                NPC1CurrentState = self.npc1.state
+                if NPC1CurrentState.speed > MAX_SPEED + SPEED_VARIANCE:
+                    raise evaluator.TestException("NPC1 speed exceeded limit, {} > {} m/s".format(NPC1CurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
+
+                NPC2CurrentState = self.npc2.state
+                if NPC2CurrentState.speed > MAX_SPEED + SPEED_VARIANCE:
+                    raise evaluator.TestException("NPC2 speed exceeded limit, {} > {} m/s".format(NPC2CurrentState.speed, MAX_SPEED + SPEED_VARIANCE))
+
+                self.sim.run(0.5)
+
+                if time.time() - t0 > TIME_LIMIT:
+                    break
+
+        except evaluator.TestException as e:
+            print("FAILED: " + repr(e))
+            exit()
+
+        print("Program Terminated")
 
 if __name__ == "__main__":
     scene = GenerateScene()
     scene.generate_EGO()
-    scene.generate_POV()
-    # scene.run()
+    scene.generate_NPCs()
+    scene.run()
