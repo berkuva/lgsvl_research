@@ -94,7 +94,7 @@ class GenerateScene:
     def on_collision(self, agent1, agent2, contact):
         raise evaluator.TestException("Colision between {} and {}".format(agent1, agent2))
 
-    def ttc(self, distance, ttc): #calculate the time to collision between the NPCs
+    def ttc(self, distance): #calculate the time to collision between the NPCs
         approaching = False
         dist_changed = False
         
