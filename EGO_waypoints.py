@@ -9,6 +9,8 @@ import os
 import lgsvl
 import random
 import time
+import math
+import numpy as np
 
 ###################### simulator ######################
 sim = lgsvl.Simulator(os.environ.get("SIMULATOR_HOST", "127.0.0.1"), 8181)
@@ -21,7 +23,7 @@ else:
 spawns = sim.get_spawn()
 state = lgsvl.AgentState()
 state.transform = spawns[0]
-a = sim.add_agent("Lincoln2017MKZ (Apollo 5.0)", lgsvl.AgentType.EGO, state)
+ego = sim.add_agent("Lincoln2017MKZ (Apollo 5.0)", lgsvl.AgentType.EGO, state)
 
 
 ###################### NPC ######################
@@ -41,7 +43,7 @@ npc = sim.add_agent("Sedan", lgsvl.AgentType.NPC, state)
 
 ###################### collision callback ######################
 vehicles = {
-  a: "EGO",
+  ego: "EGO",
   npc: "Sedan",
 }
 
@@ -50,45 +52,60 @@ def on_collision(agent1, agent2, contact):
   name2 = vehicles[agent2] if agent2 is not None else "OBSTACLE"
   print("{} collided with {}".format(name1, name2))
 
-a.on_collision(on_collision)
+ego.on_collision(on_collision)
 npc.on_collision(on_collision)
 
 
+###################### Time to Collision - reward fn in RL #####################
+distance = 0
+def ttc(): #calculate the time to collision between EGO and NPC
+    global distance
+    approaching = False
+    dist_changed = 0
+    
+
+    dist = abs(math.sqrt( (npc.state.position.x - ego.state.position.x)**2 + \
+                          (npc.state.position.y - ego.state.position.y)**2 + \
+                          (npc.state.position.z - ego.state.position.z)**2))
+    if distance == 0:
+        distance = dist
+        approaching = None
+    else:
+        dist_changed = distance - dist
+        distance = dist
+        approaching = dist_changed > 0
+    
+
+    relative_speed = npc.state.speed - ego.state.speed
+    
+    if approaching == None:
+        ttc = "timestep = 0"
+    elif approaching:
+        ttc = npc.uid.split("(Clone)")[0] + " " + str(np.round(distance / relative_speed, 3)) + " seconds"
+    else:
+        if distance != 0:
+          ttc = npc.uid.split("(Clone)")[0] + " is moving away from EGO"
+        else:
+          ttc = npc.uid.split("(Clone)")[0] + " " + str(np.round(distance / relative_speed, 3)) + " seconds"
+
+    print(ttc)
+    return distance, ttc
+
+
+
 ###################### NPC waypoints ######################
-# Each waypoint is a position vector paired with the speed that the NPC will drive to it
-# waypoints = []
-# x_max = 2
-# z_delta = 2
-
-# layer_mask = 0
-# layer_mask |= 1 << 0 # 0 is the layer for the road (default)
-
-# for i in range(20):
-#   px = 0
-#   pz = (i + 1) * z_delta
-
-#   # Raycast the points onto the ground because BorregasAve is not flat
-#   hit = sim.raycast(origin=lgsvl.Vector(sx + px, sy, sz - pz),
-#   					direction=lgsvl.Vector(0, -1, 0),
-#   					layer_mask=layer_mask) 
-#   # NPC will wait for 0 second at each waypoint
-#   wp = lgsvl.DriveWaypoint(position=hit.point, speed=7)
-#   # print(wp.position)
-#   waypoints.append(wp)
-
-# print(a.state.position)
 waypoints = [ \
     lgsvl.DriveWaypoint(position=lgsvl.Vector(13.81, -3.15, 63.50),
-    					angle=lgsvl.Vector(0, 180, 0),
-    					speed=10),
+              angle=lgsvl.Vector(0, 180, 0),
+              speed=10),
 
     lgsvl.DriveWaypoint(position=lgsvl.Vector(13.81, -2.2, 17),
-    					angle=lgsvl.Vector(0, 180, 0),
-    					speed=10),
+              angle=lgsvl.Vector(0, 180, 0),
+              speed=10),
 
     lgsvl.DriveWaypoint(position=lgsvl.Vector(13.81, -1.12, -46.505),
-    					angle=lgsvl.Vector(0, 180, 0),
-    					speed=10),
+              angle=lgsvl.Vector(0, 180, 0),
+              speed=10),
 ]
 
 
@@ -115,14 +132,39 @@ signal.control(control_policy)
 
 ###################### connect to bridge; run simulation ######################
 # An EGO will not connect to a bridge unless commanded to
-print("Bridge connected:", a.bridge_connected)
+print("Bridge connected:", ego.bridge_connected)
 # The EGO is now looking for a bridge at the specified IP and port
-a.connect_bridge("127.0.0.1", 9090)
+ego.connect_bridge("127.0.0.1", 9090)
 print("Waiting for connection...")
-while not a.bridge_connected:
+while not ego.bridge_connected:
   time.sleep(1)
-print("Bridge connected:", a.bridge_connected)
+print("Bridge connected:", ego.bridge_connected)
 print("Initializing simulation")
 sim.run(1)
 input("Press Enter to run")
-sim.run(30)
+sim.run(1)
+ttc()
+sim.run(1)
+ttc()
+input("Press Enter to change weather")
+sim.weather = lgsvl.WeatherState(rain=0.9, fog=0.3, wetness=0.1)
+sim.run(1)
+ttc()
+sim.run(1)
+ttc()
+sim.run(1)
+ttc()
+sim.run(1)
+ttc()
+sim.run(1)
+ttc()
+sim.run(1)
+ttc()
+sim.run(1)
+ttc()
+sim.run(1)
+ttc()
+sim.run(1)
+ttc()
+sim.run(1)
+ttc()
