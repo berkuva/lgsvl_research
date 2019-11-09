@@ -24,9 +24,7 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='interval between training status logs (default: 10)')
 args = parser.parse_args()
 
-
 torch.manual_seed(args.seed)
-
 
 SavedAction = namedtuple('SavedAction', ['log_prob', 'value'])
 
@@ -35,6 +33,7 @@ class Policy(nn.Module):
     """
     implements both actor and critic in one model
     """
+
     def __init__(self):
         super(Policy, self).__init__()
         self.affine1 = nn.Linear(4, 128)
@@ -79,9 +78,9 @@ class Scenario():
         ###################### simulator ######################
         self.sim = lgsvl.Simulator(os.environ.get("SIMULATOR_HOST", "127.0.0.1"), 8181)
         if self.sim.current_scene == "BorregasAve":
-          self.sim.reset()
+            self.sim.reset()
         else:
-          self.sim.load("BorregasAve")
+            self.sim.load("BorregasAve")
 
         ###################### EGO ######################
         spawns = self.sim.get_spawn()
@@ -102,24 +101,10 @@ class Scenario():
         state.transform.rotation.y = 180.0
         self.npc = self.sim.add_agent("Sedan", lgsvl.AgentType.NPC, state)
 
-        ###################### NPC waypoints ######################
-        self.waypoints = [ \
-            lgsvl.DriveWaypoint(position=lgsvl.Vector(13.81, -3.15, 63.50),
-                      angle=lgsvl.Vector(0, 180, 0),
-                      speed=10),
+        self.waypoints = []
 
-            lgsvl.DriveWaypoint(position=lgsvl.Vector(13.81, -2.2, 17),
-                      angle=lgsvl.Vector(0, 180, 0),
-                      speed=10),
-
-            lgsvl.DriveWaypoint(position=lgsvl.Vector(13.81, -1.12, -46.505),
-                      angle=lgsvl.Vector(0, 180, 0),
-                      speed=10),
-        ]
-
-        self.npc.on_waypoint_reached(self.on_waypoint)
-        self.npc.follow(waypoints)
-
+        self.y_positions = []
+        self.z_positions = []
 
         ###################### Traffic light is kept green ######################
         controllables = sim.get_controllables()
@@ -137,35 +122,49 @@ class Scenario():
 
         self.R = 0
         self.saved_actions = model.saved_actions
-        self.policy_losses = [] # list to save actor (policy) loss
-        self.value_losses = [] # list to save critic (value) loss
-        self.returns = [] # list to save the true values
-
-
+        self.policy_losses = []  # list to save actor (policy) loss
+        self.value_losses = []  # list to save critic (value) loss
+        self.returns = []  # list to save the true values
 
     def on_waypoint(self, agent, index):
         print("=======")
         print("waypoint {} reached".format(index))
 
+    def sample_waypoint(self, timestep):
+        x_pos = 13.81
+
+        if timestep>0:
+            y_pos = self.y_positions[timestep-1] - 0.15
+            z_pos = self.z_positions[timestep-1] - random.randint(5, 10)
+        else:
+            y_pos = -3.15
+            z_pos = 63.50
+
+        self.y_positions.append(y_pos)
+        self.z_positions.append[z_pos]
+
+        wp = lgsvl.Vector(x_pos, y_pos, z_pos)
+        self.waypoints.append(wp)
+        return wp
+
 
     def select_action(self):
         EGO_position = np.array([self.ego.state.position.x,
-                                self.ego.state.position.y,
-                                self.ego.state.position.z])
+                                 self.ego.state.position.y,
+                                 self.ego.state.position.z])
         NPC_position = np.array([self.npc.state.position.x,
-                                self.npc.state.position.y,
-                                self.npc.state.position.z])
+                                 self.npc.state.position.y,
+                                 self.npc.state.position.z])
         fog = lgsvl.WeatherState()
-
 
     def calculate_ttc(self):
         '''calculate the time to collision between EGO and NPC'''
         approaching = False
         dist_changed = 0
 
-        dist = abs(math.sqrt( (self.npc.state.position.x - self.ego.state.position.x)**2 + \
-                              (self.npc.state.position.y - self.ego.state.position.y)**2 + \
-                              (self.npc.state.position.z - self.ego.state.position.z)**2))
+        dist = abs(math.sqrt((self.npc.state.position.x - self.ego.state.position.x) ** 2 + \
+                             (self.npc.state.position.y - self.ego.state.position.y) ** 2 + \
+                             (self.npc.state.position.z - self.ego.state.position.z) ** 2))
         if self.distance == 0:
             self.distance = dist
             approaching = None
@@ -177,19 +176,18 @@ class Scenario():
         relative_speed = self.npc.state.speed - self.ego.state.speed
 
         self.ttc = np.round(self.distance / relative_speed, 3)
-        
+
         if approaching == None:
             ttc_log = "timestep = 0"
         elif approaching:
             ttc_log = self.npc.uid.split("(Clone)")[0] + " " + str(self.ttc) + " seconds"
         else:
             if self.distance != 0:
-              ttc_log = self.npc.uid.split("(Clone)")[0] + " is moving away from EGO"
+                ttc_log = self.npc.uid.split("(Clone)")[0] + " is moving away from EGO"
             else:
-              ttc_log = self.npc.uid.split("(Clone)")[0] + " " + str(self.ttc) + " seconds"
+                ttc_log = self.npc.uid.split("(Clone)")[0] + " " + str(self.ttc) + " seconds"
 
         print(ttc_log)
-
 
     def step(self):
         '''
@@ -200,7 +198,7 @@ class Scenario():
                 finished in terminal state or not
                 others
 
-        In this function, we run the simulator with the set actions, 
+        In this function, we run the simulator with the set actions,
         and calculate the reward
         '''
         ###################### connect to bridge; run simulation ######################
@@ -210,13 +208,13 @@ class Scenario():
         self.ego.connect_bridge("127.0.0.1", 9090)
         print("Waiting for connection...")
         while not self.ego.bridge_connected:
-          time.sleep(1)
+            time.sleep(1)
         print("Bridge connected:", self.ego.bridge_connected)
         print("Initializing simulation")
         sim.run(1)
         input("Press Enter to run")
 
-        runtime = 30 #seconds
+        runtime = 30  # seconds
         current_time = 0
 
         while current_time < runtime:
@@ -260,7 +258,6 @@ class Scenario():
         del model.rewards[:]
         del model.saved_actions[:]
 
-
     def main():
         running_reward = 10
 
@@ -293,7 +290,7 @@ class Scenario():
             # log results
             if i_episode % args.log_interval == 0:
                 print('Episode {}\tLast reward: {:.2f}\tAverage reward: {:.2f}'.format(
-                      i_episode, ep_reward, running_reward))
+                    i_episode, ep_reward, running_reward))
 
             # check if crash happens
             if running_reward > env.spec.reward_threshold:
