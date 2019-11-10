@@ -13,33 +13,30 @@ import lgsvl
 import random
 import time
 
-parser = argparse.ArgumentParser(description='PyTorch actor-critic example')
+parser = argparse.ArgumentParser(description='lgsvl actor-critic')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
                     help='discount factor (default: 0.99)')
 parser.add_argument('--seed', type=int, default=543, metavar='N',
                     help='random seed (default: 543)')
-parser.add_argument('--render', action='store_false',
-                    help='render the environment')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='interval between training status logs (default: 10)')
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)
 
-SavedAction = namedtuple('SavedAction', ['log_prob', 'value'])
+SavedAction = namedtuple('SavedAction', ['action_probs', 'value'])
 
 
 class Policy(nn.Module):
     """
     implements both actor and critic in one model
     """
-
     def __init__(self):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(4, 128)
+        self.affine1 = nn.Linear(2, 128)
 
         # actor's layer
-        self.action_head = nn.Linear(128, 2)
+        self.action_head = nn.Linear(128, 2)#probability of moving in z direction, probability of speeding 
 
         # critic's layer
         self.value_head = nn.Linear(128, 1)
@@ -73,7 +70,8 @@ eps = np.finfo(np.float32).eps.item()
 
 
 class Scenario():
-    def __init__(self):
+
+    def reset_environment(self):
         '''start simulator, spawn EGO and NPC'''
         ###################### simulator ######################
         self.sim = lgsvl.Simulator(os.environ.get("SIMULATOR_HOST", "127.0.0.1"), 8181)
@@ -86,7 +84,9 @@ class Scenario():
         spawns = self.sim.get_spawn()
         state = lgsvl.AgentState()
         state.transform = spawns[0]
+
         self.ego = self.sim.add_agent("Lincoln2017MKZ (Apollo 5.0)", lgsvl.AgentType.EGO, state)
+        self.ego.on_collision(self.on_collision)
 
         ###################### NPC ######################
         sx = spawns[0].position.x - 8
@@ -99,12 +99,12 @@ class Scenario():
         state.transform.position.z = sz
 
         state.transform.rotation.y = 180.0
+
         self.npc = self.sim.add_agent("Sedan", lgsvl.AgentType.NPC, state)
-
-        self.waypoints = []
-
+        self.npc.on_waypoint_reached(self.on_waypoint)
+        self.npc.on_collision(self.on_collision)
+        
         self.y_positions = []
-        self.z_positions = []
 
         ###################### Traffic light is kept green ######################
         controllables = sim.get_controllables()
@@ -118,90 +118,12 @@ class Scenario():
         # Control this traffic light with a new control policy
         signal.control(control_policy)
 
-        self.distance = 0
+        self.z_position = sz
+        self.npc_speed = 7
 
-        self.R = 0
-        self.saved_actions = model.saved_actions
-        self.policy_losses = []  # list to save actor (policy) loss
-        self.value_losses = []  # list to save critic (value) loss
-        self.returns = []  # list to save the true values
+        self.timestep=0
 
-    def on_waypoint(self, agent, index):
-        print("=======")
-        print("waypoint {} reached".format(index))
-
-    def sample_waypoint(self, timestep):
-        x_pos = 13.81
-
-        if timestep>0:
-            y_pos = self.y_positions[timestep-1] - 0.15
-            z_pos = self.z_positions[timestep-1] - random.randint(5, 10)
-        else:
-            y_pos = -3.15
-            z_pos = 63.50
-
-        self.y_positions.append(y_pos)
-        self.z_positions.append[z_pos]
-
-        wp = lgsvl.Vector(x_pos, y_pos, z_pos)
-        self.waypoints.append(wp)
-        return wp
-
-
-    def select_action(self):
-        EGO_position = np.array([self.ego.state.position.x,
-                                 self.ego.state.position.y,
-                                 self.ego.state.position.z])
-        NPC_position = np.array([self.npc.state.position.x,
-                                 self.npc.state.position.y,
-                                 self.npc.state.position.z])
-        fog = lgsvl.WeatherState()
-
-    def calculate_ttc(self):
-        '''calculate the time to collision between EGO and NPC'''
-        approaching = False
-        dist_changed = 0
-
-        dist = abs(math.sqrt((self.npc.state.position.x - self.ego.state.position.x) ** 2 + \
-                             (self.npc.state.position.y - self.ego.state.position.y) ** 2 + \
-                             (self.npc.state.position.z - self.ego.state.position.z) ** 2))
-        if self.distance == 0:
-            self.distance = dist
-            approaching = None
-        else:
-            dist_changed = self.distance - dist
-            self.distance = dist
-            approaching = dist_changed > 0
-
-        relative_speed = self.npc.state.speed - self.ego.state.speed
-
-        self.ttc = np.round(self.distance / relative_speed, 3)
-
-        if approaching == None:
-            ttc_log = "timestep = 0"
-        elif approaching:
-            ttc_log = self.npc.uid.split("(Clone)")[0] + " " + str(self.ttc) + " seconds"
-        else:
-            if self.distance != 0:
-                ttc_log = self.npc.uid.split("(Clone)")[0] + " is moving away from EGO"
-            else:
-                ttc_log = self.npc.uid.split("(Clone)")[0] + " " + str(self.ttc) + " seconds"
-
-        print(ttc_log)
-
-    def step(self):
-        '''
-        Input: action to take
-            (which have already took effect by setting weather, time of day)
-        Return: resulting state
-                reward earned
-                finished in terminal state or not
-                others
-
-        In this function, we run the simulator with the set actions,
-        and calculate the reward
-        '''
-        ###################### connect to bridge; run simulation ######################
+    def connect2bridge(self):
         # An EGO will not connect to a bridge unless commanded to
         print("Bridge connected:", self.ego.bridge_connected)
         # The EGO is now looking for a bridge at the specified IP and port
@@ -211,22 +133,75 @@ class Scenario():
             time.sleep(1)
         print("Bridge connected:", self.ego.bridge_connected)
         print("Initializing simulation")
-        sim.run(1)
-        input("Press Enter to run")
 
-        runtime = 30  # seconds
-        current_time = 0
+    def on_collision(self, contact):
+        print("EGO and NPC collided!")
+        
+    def on_waypoint(self, agent, index):
+        print("=======")
+        print("waypoint {} reached".format(index))
 
-        while current_time < runtime:
-            self.sim.run(1)
-            self.calculate_ttc()
-            self.finish_episode()
+    def sample_waypoint(self):
+        '''sample a waypoint that depends on self.z_position'''
+        if self.timestep>0:
+            y_pos = self.y_positions[self.timestep-1] - 0.15
+        else:
+            y_pos = -3.15
+        self.y_positions.append(y_pos)
+        self.timestep += 1
+
+        position = lgsvl.Vector(13.81, y_pos, self.z_position)
+        angle = lgsvl.Vector(0, 180, 0)
+        
+        waypoint = lgsvl.DriveWaypoint(wp, angle, self.npc_speed)
+
+        return waypoint
+
+    def select_action(self, state):
+        '''update self.z_position and self.npc_speed using the model'''
+        action_probs, state_value = model(state)
+        action_probs[0] *= -10 #new self.z_position = -5 (action_probs[0]==0.5. 0.5*-10=-5)
+        action_probs[1] *= 14 #speed 7 on average (action_probs[1]==0.5. 0.5*14=7)
+
+        self.z_position += action_probs[0].item() #expected value=-5
+        self.speed = action_probs[1].item() #expected value=7
+
+        #save to action buffer
+        model.saved_actions.append(SavedAction(action_probs, state_value))
+        return action_probs
+
+    def step(self, action_probs, waypoint):
+        '''
+        1. move npc to new waypoint,
+        2. reward (1/ttc) & done
+        '''
+        self.npc.follow(waypoint)
+        time2collision = ttc()
+        reward = 1/time2collision
+        done = self.timestep>=30
+        return reward, done
+        
+    def calculate_ttc(self):
+        '''calculate the time to collision between EGO and NPC'''
+        dist = abs(math.sqrt((self.npc.state.position.x - self.ego.state.position.x) ** 2 + \
+                             (self.npc.state.position.y - self.ego.state.position.y) ** 2 + \
+                             (self.npc.state.position.z - self.ego.state.position.z) ** 2))
+
+        relative_speed = self.npc.state.speed - self.ego.state.speed
+
+        ttc = np.round(dist / relative_speed, 3)
+        return ttc
 
     def finish_episode(self):
         """
         Training code. Calcultes actor and critic loss, reward, and performs backprop.
         """
         # calculate the true value using rewards returned from the environment
+        R = 0
+        saved_actions = model.saved_actions
+        policy_losses = []  # list to save actor (policy) loss
+        value_losses = []  # list to save critic (value) loss
+        returns = []  # list to save the true values
         for r in model.rewards[::-1]:
             # calculate the discounted value
             R = r + args.gamma * R
@@ -235,11 +210,11 @@ class Scenario():
         returns = torch.tensor(returns)
         returns = (returns - returns.mean()) / (returns.std() + eps)
 
-        for (log_prob, value), R in zip(saved_actions, returns):
+        for (action_prob, value), R in zip(saved_actions, returns):
             advantage = R - value.item()
 
             # calculate actor (policy) loss
-            policy_losses.append(-log_prob * advantage)
+            policy_losses.append(-action_prob * advantage)
 
             # calculate critic (value) loss using L1 smooth loss
             value_losses.append(F.smooth_l1_loss(value, torch.tensor([R])))
@@ -258,28 +233,41 @@ class Scenario():
         del model.rewards[:]
         del model.saved_actions[:]
 
+    def run_simulator(self):
+        self.sim.run(1)
+        input("Enter to resume")
+
     def main():
         running_reward = 10
 
         # number of times to run scenario
         for i_episode in range(1):
 
-            # reset environment and episode reward
-            simulator, ego, npc = reset_environment()
+            # start simulator, set up environment, connect to bridge
+            self.reset_environment()
+            self.connect2bridge()
 
+            # reset episode reward
             ep_reward = 0
 
-            # select action from policy
-            sim.weather, time_of_day = select_action(simulator)
-            action = [sim.weather, time_of_day]
+            # run 10 times for each episode
+            for t in range(1, 10):
+                state = torch.FloatTensor([self.z_position, self.npc_speed])
 
-            # take the action
-            state, reward, done, _ = step(action)
+                # select action from policy
+                action_probs = select_action(state) #action=tensor(z distance to move, speed)
+                waypoint = sample_waypoint()
 
-            model.rewards.append(reward)
-            ep_reward += reward
-            if done:
-                break
+                # take the action
+                reward, done = step(action_probs, waypoint)
+
+                self.run_simulator()
+
+                model.rewards.append(reward)
+                ep_reward += reward
+
+                if done:
+                    break
 
             # update cumulative reward
             running_reward = 0.05 * ep_reward + (1 - 0.05) * running_reward
@@ -293,9 +281,8 @@ class Scenario():
                     i_episode, ep_reward, running_reward))
 
             # check if crash happens
-            if running_reward > env.spec.reward_threshold:
-                print("Crashed! Running reward is now {} and "
-                      "the last episode runs to {} time steps!".format(running_reward, t))
+            if :
+                print("Crashed!")
                 break
 
 
