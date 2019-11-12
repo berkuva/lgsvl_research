@@ -178,7 +178,7 @@ class Scenario():
 
     def sample_waypoint(self):
         '''sample a waypoint that depends on self.z_position'''
-        self.y_position += 1/10
+        self.y_position += 1/5
         position = lgsvl.Vector(13.81, self.y_position, self.z_position)
 
         waypoint = lgsvl.DriveWaypoint(position=position,
@@ -260,7 +260,15 @@ class Scenario():
         del model.saved_actions[:]
 
     def run_simulator(self):
-        self.sim.run(10)
+        runtime = 10
+        i = 0
+        while i < 10:
+            if not self.collided:
+                # print("The NPC is currently at {}".format(self.npc.state.position))
+                self.sim.run(1)
+                i += 1
+            else:
+                break
         # input("Enter to resume")
 
     def main(self, i_episode):
@@ -281,12 +289,13 @@ class Scenario():
         ep_reward = 0
 
         # run 10 times for each episode
-        for t in range(1, 3):
+        for t in range(1, 10):
             print("\n==========iteration {}==========".format(t))
             print("state {}".format(state))
 
             # select action from policy
             self.update_state(state)
+            state = torch.FloatTensor([self.z_position, self.npc_speed])
             waypoint = self.sample_waypoint()
             print("waypoint {}, at speed {}".format(waypoint.position,
                                                     waypoint.speed))
