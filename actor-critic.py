@@ -72,6 +72,7 @@ optimizer = optim.Adam(model.parameters(), lr=3e-2)
 eps = np.finfo(np.float32).eps.item()
 torch.autograd.set_detect_anomaly(True)
 
+
 class Scenario():
 
     def __init__(self, sim):
@@ -84,12 +85,7 @@ class Scenario():
         self.timestep = 1
         self.collided = False
 
-
-    def set_environment(self, i_episode):
-        if i_episode > 1:
-            self.sim.close()
-            self.sim = lgsvl.Simulator(os.environ.get("SIMULATOR_HOST", "127.0.0.1"), 8181)
-
+    def set_environment(self):
         '''start simulator, spawn EGO and NPC'''
         ###################### simulator ######################
         if self.sim.current_scene == "BorregasAve":
@@ -103,7 +99,7 @@ class Scenario():
         state.transform = spawns[0]
 
         self.ego = self.sim.add_agent("Lincoln2017MKZ (Apollo 5.0)", lgsvl.AgentType.EGO, state)
-        
+
         ###################### NPC ######################
         sx = spawns[0].position.x - 8
         sy = spawns[0].position.y
@@ -120,12 +116,11 @@ class Scenario():
         self.npc.on_waypoint_reached(self.on_waypoint)
 
         self.vehicles = {
-          self.ego: "EGO",
-          self.npc: "Sedan",
+            self.ego: "EGO",
+            self.npc: "Sedan",
         }
         self.ego.on_collision(self.on_collision)
         self.npc.on_collision(self.on_collision)
-
 
         ###################### Traffic light is kept green ######################
         controllables = self.sim.get_controllables()
@@ -178,12 +173,12 @@ class Scenario():
 
     def sample_waypoint(self):
         '''sample a waypoint that depends on self.z_position'''
-        self.y_position += 1/5
+        self.y_position += 1 / 5
         position = lgsvl.Vector(13.81, self.y_position, self.z_position)
 
         waypoint = lgsvl.DriveWaypoint(position=position,
-                                        angle=lgsvl.Vector(0, 180, 0),
-                                        speed=self.npc_speed)
+                                       angle=lgsvl.Vector(0, 180, 0),
+                                       speed=self.npc_speed)
         return waypoint
 
     def move(self, waypoint):
@@ -196,7 +191,7 @@ class Scenario():
             reward = 1000
             done = True
         else:
-            reward = 1/self.calculate_ttc()
+            reward = 1 / self.calculate_ttc()
             done = self.timestep >= 30
             self.timestep += 1
         return reward, done
@@ -209,7 +204,7 @@ class Scenario():
 
         print("NPC speed {}".format(self.npc_speed))
         print("EGO speed {}".format(self.ego.state.speed))
-        
+
         relative_speed = self.npc_speed - self.ego.state.speed
 
         ttc = abs(np.round(dist / relative_speed, 3))
@@ -260,25 +255,25 @@ class Scenario():
         del model.saved_actions[:]
 
     def run_simulator(self):
-        runtime = 10
-        i = 0
-        while i < 10:
-            if not self.collided:
-                # print("The NPC is currently at {}".format(self.npc.state.position))
-                self.sim.run(1)
-                i += 1
-            else:
-                break
-        # input("Enter to resume")
+        # runtime = 10
+        # i = 0
+        # while i < 10:
+        #     if not self.collided:
+        #         # print("The NPC is currently at {}".format(self.npc.state.position))
+        #         self.sim.run(1)
+        #         i += 1
+        #     else:
+        #         break
+        sim.run(2)
 
     def main(self, i_episode):
-        running_reward = 10
+        global running_reward
 
         # run episodes
-        print("i_episode {}".format(i_episode)) 
+        print("i_episode {}".format())
 
         # start simulator, set up environment, connect to bridge
-        self.set_environment(i_episode)
+        self.set_environment()
         print("finished setting environment")
         self.connect2bridge()
         print("connected!!!")
@@ -289,7 +284,7 @@ class Scenario():
         ep_reward = 0
 
         # run 10 times for each episode
-        for t in range(1, 10):
+        for t in range(1, 5):
             print("\n==========iteration {}==========".format(t))
             print("state {}".format(state))
 
@@ -324,12 +319,11 @@ class Scenario():
         if i_episode % args.log_interval == 0:
             print('Episode {}\tLast reward: {:.2f}\tAverage reward: {:.2f}'.format(
                 i_episode, ep_reward, running_reward))
-        if i_episode == 1:
-            self.sim.reset()
 
 sim = lgsvl.Simulator(os.environ.get("SIMULATOR_HOST", "127.0.0.1"), 8181)
 
 if __name__ == '__main__':
+    running_reward = 10
     num_episodes = 10
     episode_counter = 1
     while episode_counter <= num_episodes:
