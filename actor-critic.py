@@ -270,7 +270,7 @@ class Scenario():
         global running_reward
 
         # run episodes
-        print("i_episode {}".format())
+        print("i_episode {}".format(i_episode))
 
         # start simulator, set up environment, connect to bridge
         self.set_environment()
