@@ -81,8 +81,7 @@ class Scenario():
         self.npc = None
         self.z_position = None
         self.y_position = -3.15
-        self.npc_speed = 10
-        self.timestep = 1
+        self.npc_speed = 7
         self.collided = False
 
     def set_environment(self):
@@ -99,6 +98,11 @@ class Scenario():
         state.transform = spawns[0]
 
         self.ego = self.sim.add_agent("Lincoln2017MKZ (Apollo 5.0)", lgsvl.AgentType.EGO, state)
+
+        # sensors = self.ego.get_sensors()
+        # c = lgsvl.VehicleControl()
+        # c.turn_signal_left = True
+        # self.ego.apply_control(c, True)
 
         ###################### NPC ######################
         sx = spawns[0].position.x - 8
@@ -127,15 +131,15 @@ class Scenario():
         # Pick a traffic light of intrest
         signal = controllables[2]
         # Get current controllable states
-        print("\n# Current control policy:")
-        print(signal.control_policy)
+        # print("\n# Current control policy:")
+        # print(signal.control_policy)
         # Create a new control policy
         control_policy = "trigger=100;green=100;yellow=0;red=0;loop"
         # Control this traffic light with a new control policy
         signal.control(control_policy)
 
         self.z_position = sz
-        print("initial z_position: {}".format(self.z_position))
+        # print("initial z_position: {}".format(self.z_position))
 
     def connect2bridge(self):
         # An EGO will not connect to a bridge unless commanded to
@@ -156,15 +160,24 @@ class Scenario():
         print("############{} collided with {}############".format(name1, name2))
 
     def on_waypoint(self, agent, index):
+        pass
         # print("=======")
-        print("waypoint {} reached".format(index))
+        # print("waypoint {} reached".format(index))
 
     def update_state(self, state):
         '''update self.z_position and self.npc_speed using the model'''
         action_probs, state_value = model(state)
         print("action_probs {}".format(action_probs))
-        # pdb.set_trace()
-        self.z_position -= 10  # expected value=-5
+
+        z_pos_strength = action_probs[0].item()
+        speed_strength = action_probs[1].item()
+
+        if z_pos_strength < 0.001 or speed_strength < 0.001:
+            self.z_position -= 10
+            # self.npc_speed remains same with previous value
+        else:
+            self.z_position -= self.z_position*z_pos_strength
+            self.npc_speed += self.npc_speed*speed_strength
         print("new z_position {}, npc_speed {}".format(self.z_position, self.npc_speed))
 
         # save to action buffer
@@ -173,7 +186,8 @@ class Scenario():
 
     def sample_waypoint(self):
         '''sample a waypoint that depends on self.z_position'''
-        self.y_position += 1 / 5
+        self.y_position += 0.1
+
         position = lgsvl.Vector(13.81, self.y_position, self.z_position)
 
         waypoint = lgsvl.DriveWaypoint(position=position,
@@ -187,13 +201,13 @@ class Scenario():
         return reward (1/ttc) & done
         '''
         self.npc.follow([waypoint])
+
         if self.collided:
-            reward = 1000
+            reward = 100
             done = True
         else:
             reward = 1 / self.calculate_ttc()
-            done = self.timestep >= 30
-            self.timestep += 1
+            done = False
         return reward, done
 
     def calculate_ttc(self):
@@ -202,14 +216,14 @@ class Scenario():
                              (self.npc.state.position.y - self.ego.state.position.y) ** 2 + \
                              (self.npc.state.position.z - self.ego.state.position.z) ** 2))
 
-        print("NPC speed {}".format(self.npc_speed))
-        print("EGO speed {}".format(self.ego.state.speed))
+        # print("NPC speed {}".format(self.npc_speed))
+        # print("EGO speed {}".format(self.ego.state.speed))
 
         relative_speed = self.npc_speed - self.ego.state.speed
 
         ttc = abs(np.round(dist / relative_speed, 3))
-        print("distance: {}, relative speed {}".format(dist, relative_speed))
-        print("TTC {}".format(ttc))
+        # print("distance: {}, relative speed {}".format(dist, relative_speed))
+        # print("TTC {}".format(ttc))
         return ttc
 
     def finish_episode(self):
@@ -217,7 +231,7 @@ class Scenario():
         Training code. Calcultes actor and critic loss, reward, and performs backprop.
         """
         # calculate the true value using rewards returned from the environment
-        R = 0
+        R = 0 #discounted reward
         saved_actions = model.saved_actions
         policy_losses = []  # list to save actor (policy) loss
         value_losses = []  # list to save critic (value) loss
@@ -264,7 +278,7 @@ class Scenario():
         #         i += 1
         #     else:
         #         break
-        sim.run(2)
+        sim.run(1)
 
     def main(self, i_episode):
         global running_reward
@@ -276,7 +290,7 @@ class Scenario():
         self.set_environment()
         print("finished setting environment")
         self.connect2bridge()
-        print("connected!!!")
+        print("connected")
 
         state = torch.FloatTensor([self.z_position, self.npc_speed])
 
@@ -284,9 +298,9 @@ class Scenario():
         ep_reward = 0
 
         # run 10 times for each episode
-        for t in range(1, 5):
-            print("\n==========iteration {}==========".format(t))
-            print("state {}".format(state))
+        for t in range(1, 10):
+            print("\niteration {}".format(t))
+            # print("state {}".format(state))
 
             # select action from policy
             self.update_state(state)
@@ -313,16 +327,21 @@ class Scenario():
         # perform backprop
         self.finish_episode()
 
-        # self.sim.reset()
-
         # log results
         if i_episode % args.log_interval == 0:
-            print('Episode {}\tLast reward: {:.2f}\tAverage reward: {:.2f}'.format(
-                i_episode, ep_reward, running_reward))
+            with open("ac-log.txt", "a+") as logfile:
+                logfile.write("   {} \t\t  {:.2f}\t\t\t{:.2f}\t\t{}\n".format(i_episode,
+                                                            ep_reward,
+                                                            running_reward,
+                                                            self.collided))
+
 
 sim = lgsvl.Simulator(os.environ.get("SIMULATOR_HOST", "127.0.0.1"), 8181)
 
 if __name__ == '__main__':
+    os.remove("ac-log.txt")
+    with open("ac-log.txt", "a+") as logfile:
+        logfile.write("Episode\tEpisode cum reward\tAvg running reward\tcollided\n")
     running_reward = 10
     num_episodes = 10
     episode_counter = 1
