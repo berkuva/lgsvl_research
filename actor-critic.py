@@ -37,13 +37,15 @@ class Policy(nn.Module):
 
     def __init__(self):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(6, 128)
+        self.affine1 = nn.Linear(5, 128)
 
-        # actor's layer - chooses probability strengths for z_position and npc_speed
-        self.action_head = nn.Linear(128, 6)
+        # actor's layer - chooses probability strengths for z_position, npc_speed, rain, fog, wetness, time of day
+        self.action_layer1 = nn.Linear(128, 128)
+        self.action_layer2 = nn.Linear(128, 5)
 
         # critic's layer - evaluates being in current state
-        self.value_head = nn.Linear(128, 1)
+        self.value_layer1 = nn.Linear(128, 128)
+        self.value_layer2 = nn.Linear(128, 1)
 
         # action & reward buffer
         self.saved_actions = []
@@ -56,9 +58,12 @@ class Policy(nn.Module):
         x = F.relu(self.affine1(x))
 
         # actor
-        action_prob = F.softmax(self.action_head(x), dim=-1)
+        x_a = self.action_layer1(x)
+        x_a = self.action_layer2(x_a)
+        action_prob = F.softmax(x_a, dim=-1)
         # critic
-        state_values = self.value_head(x)
+        x_c = self.value_layer1(x)
+        state_values = self.value_layer2(x_c)
 
         # pdb.set_trace()
 
@@ -84,7 +89,7 @@ class Scenario():
         self.rain_rate = 0
         self.fog_rate = 0
         self.wetness_rate = 0
-        self.timeofday = random.randrange(25)
+        # self.timeofday = random.randrange(25)
         self.y_position = -3.15
         self.npc_speed = 7
         self.collided = False
@@ -172,31 +177,32 @@ class Scenario():
     def update_state(self, state):
         '''update self.z_position and self.npc_speed using the model'''
         action_probs, state_value = model(state)
-        print("action_probs {}".format(action_probs))
+        # print("action_probs {}".format(action_probs))
 
         z_pos_strength = action_probs[0].item()
         speed_strength = action_probs[1].item()
         rain_strength = action_probs[2].item()
         fog_strength = action_probs[3].item()
         wetness_strength = action_probs[4].item()
-        timeofday_strength = action_probs[5].item()
+        # timeofday_strength = action_probs[5].item()
 
-        self.z_position -= z_pos_strength
+        self.z_position -= max(5, z_pos_strength*10)
         self.npc_speed += speed_strength
         self.rain_rate = round(rain_strength, 2)
-        self.fog_rate = round(fog_strength, 2)
+        self.fog_rate = max(0.5, round(fog_strength, 2))
         self.wetness_rate = round(wetness_strength, 2)
-        self.timeofday = int(timeofday_strength)
+        # self.timeofday = int(timeofday_strength)
 
-        print("new z_position {}, npc_speed {}".format(self.z_position, self.npc_speed))
+        # print("new z_position {}, npc_speed {}".format(self.z_position, self.npc_speed))
 
         # save to action buffer
         model.saved_actions.append(SavedAction(action_probs, state_value))
         # return action_probs
+        return action_probs
 
     def sample_waypoint(self):
         '''sample a waypoint that depends on self.z_position'''
-        self.y_position += 0.1
+        self.y_position += 0.11
 
         position = lgsvl.Vector(13.81, self.y_position, self.z_position)
 
@@ -214,7 +220,7 @@ class Scenario():
         sim.weather = lgsvl.WeatherState(rain=self.rain_rate,
                                          fog=self.fog_rate,
                                          wetness=self.wetness_rate)
-        sim.set_time_of_day(self.timeofday)
+        # sim.set_time_of_day(self.timeofday)
         if self.collided:
             reward = 100
             done = True
@@ -309,33 +315,33 @@ class Scenario():
                                     self.npc_speed,
                                     self.rain_rate,
                                     self.fog_rate,
-                                    self.wetness_rate,
-                                    self.timeofday])
+                                    self.wetness_rate])
+                                    # self.timeofday])
 
         # reset episode reward
         ep_reward = 0
-
+        action_probs = None
         # run 10 times for each episode
-        for t in range(1, 10):
+        for t in range(1, 12):
             print("\niteration {}".format(t))
             # print("state {}".format(state))
 
             # select action from policy
-            self.update_state(state)
+            action_probs = self.update_state(state)
             state = torch.FloatTensor([ self.z_position,
                                         self.npc_speed,
                                         self.rain_rate,
                                         self.fog_rate,
-                                        self.wetness_rate,
-                                        self.timeofday])
+                                        self.wetness_rate])
+                                        # self.timeofday])
 
             waypoint = self.sample_waypoint()
-            print("waypoint {}, at speed {}".format(waypoint.position,
-                                                    waypoint.speed))
+            # print("waypoint {}, at speed {}".format(waypoint.position,
+                                                    # waypoint.speed))
 
             # take the action
             reward, done = self.step(waypoint)
-            print("reward {}, done {}".format(reward, done))
+            # print("reward {}, done {}".format(reward, done))
 
             self.run_simulator()
 
@@ -354,20 +360,29 @@ class Scenario():
         # log results
         if i_episode % args.log_interval == 0:
             with open("ac-log.txt", "a+") as logfile:
-                logfile.write("   {} \t\t  {:.2f}\t\t\t{:.2f}\t\t{}\n".format(i_episode,
-                                                            ep_reward,
-                                                            running_reward,
-                                                            self.collided))
+                logfile.write("   {} \t\t  {:.2f}\t\t\t{:.2f}\t\t{}\t\t{}\t{}\t{}\t{}\n".format(  i_episode,
+                                                                                            ep_reward,
+                                                                                            running_reward,
+                                                                                            [round(prob.tolist(), 3) for prob in action_probs],
+                                                                                            self.rain_rate,
+                                                                                            self.fog_rate,
+                                                                                            self.wetness_rate,
+                                                                                            # self.timeofday,
+                                                                                            self.collided))
 
 
 sim = lgsvl.Simulator(os.environ.get("SIMULATOR_HOST", "127.0.0.1"), 8181)
 
 if __name__ == '__main__':
-    os.remove("ac-log.txt")
+    # remove if exists
+    try:
+        os.remove("ac-log.txt")
+    except:
+        pass
     with open("ac-log.txt", "a+") as logfile:
-        logfile.write("Episode\tEpisode cum reward\tAvg running reward\tcollided\n")
+        logfile.write("Episode\tEpisode cum reward\tAvg running reward\train\tact_prb\tfog\twetness\tcollided\n")
     running_reward = 10
-    num_episodes = 10
+    num_episodes = 50
     episode_counter = 1
     while episode_counter <= num_episodes:
         scenario = Scenario(sim)
