@@ -12,6 +12,7 @@ import os
 import lgsvl
 import math
 import time
+import random
 
 import pdb
 
@@ -36,10 +37,10 @@ class Policy(nn.Module):
 
     def __init__(self):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(2, 128)
+        self.affine1 = nn.Linear(6, 128)
 
         # actor's layer - chooses probability strengths for z_position and npc_speed
-        self.action_head = nn.Linear(128, 2)
+        self.action_head = nn.Linear(128, 6)
 
         # critic's layer - evaluates being in current state
         self.value_head = nn.Linear(128, 1)
@@ -80,6 +81,10 @@ class Scenario():
         self.ego = None
         self.npc = None
         self.z_position = None
+        self.rain_rate = 0
+        self.fog_rate = 0
+        self.wetness_rate = 0
+        self.timeofday = random.randrange(25)
         self.y_position = -3.15
         self.npc_speed = 7
         self.collided = False
@@ -171,13 +176,18 @@ class Scenario():
 
         z_pos_strength = action_probs[0].item()
         speed_strength = action_probs[1].item()
+        rain_strength = action_probs[2].item()
+        fog_strength = action_probs[3].item()
+        wetness_strength = action_probs[4].item()
+        timeofday_strength = action_probs[5].item()
 
-        if z_pos_strength < 0.001 or speed_strength < 0.001:
-            self.z_position -= 10
-            # self.npc_speed remains same with previous value
-        else:
-            self.z_position -= self.z_position*z_pos_strength
-            self.npc_speed += self.npc_speed*speed_strength
+        self.z_position -= z_pos_strength
+        self.npc_speed += speed_strength
+        self.rain_rate = round(rain_strength, 2)
+        self.fog_rate = round(fog_strength, 2)
+        self.wetness_rate = round(wetness_strength, 2)
+        self.timeofday = int(timeofday_strength)
+
         print("new z_position {}, npc_speed {}".format(self.z_position, self.npc_speed))
 
         # save to action buffer
@@ -195,13 +205,16 @@ class Scenario():
                                        speed=self.npc_speed)
         return waypoint
 
-    def move(self, waypoint):
+    def step(self, waypoint):
         '''
-        move npc to new waypoint,
+        move npc to new waypoint, adjust to new weather and time of day
         return reward (1/ttc) & done
         '''
         self.npc.follow([waypoint])
-
+        sim.weather = lgsvl.WeatherState(rain=self.rain_rate,
+                                         fog=self.fog_rate,
+                                         wetness=self.wetness_rate)
+        sim.set_time_of_day(self.timeofday)
         if self.collided:
             reward = 100
             done = True
@@ -292,7 +305,12 @@ class Scenario():
         self.connect2bridge()
         print("connected")
 
-        state = torch.FloatTensor([self.z_position, self.npc_speed])
+        state = torch.FloatTensor([ self.z_position,
+                                    self.npc_speed,
+                                    self.rain_rate,
+                                    self.fog_rate,
+                                    self.wetness_rate,
+                                    self.timeofday])
 
         # reset episode reward
         ep_reward = 0
@@ -304,13 +322,19 @@ class Scenario():
 
             # select action from policy
             self.update_state(state)
-            state = torch.FloatTensor([self.z_position, self.npc_speed])
+            state = torch.FloatTensor([ self.z_position,
+                                        self.npc_speed,
+                                        self.rain_rate,
+                                        self.fog_rate,
+                                        self.wetness_rate,
+                                        self.timeofday])
+
             waypoint = self.sample_waypoint()
             print("waypoint {}, at speed {}".format(waypoint.position,
                                                     waypoint.speed))
 
             # take the action
-            reward, done = self.move(waypoint)
+            reward, done = self.step(waypoint)
             print("reward {}, done {}".format(reward, done))
 
             self.run_simulator()
