@@ -9,6 +9,7 @@ import torch.optim as optim
 from torch.distributions import Categorical
 
 import os
+import gc
 import lgsvl
 import math
 import time
@@ -174,7 +175,7 @@ class Scenario():
         # print("=======")
         # print("waypoint {} reached".format(index))
 
-    def update_state(self, state):
+    def update_state(self, state, i_episode):
         '''update self.z_position and self.npc_speed using the model'''
         action_probs, state_value = model(state)
         # print("action_probs {}".format(action_probs))
@@ -186,23 +187,33 @@ class Scenario():
         wetness_strength = action_probs[4].item()
         # timeofday_strength = action_probs[5].item()
 
-        self.z_position -= max(5, z_pos_strength*10)
-        self.npc_speed += speed_strength
+        if i_episode < 5:
+            self.z_position += z_pos_strength
+            self.npc_speed += speed_strength
+        else:
+            self.z_position = z_pos_strength*10
+            self.npc_speed = speed_strength*10
+
         self.rain_rate = round(rain_strength, 2)
-        self.fog_rate = max(0.5, round(fog_strength, 2))
+        self.fog_rate = min(0.5, round(fog_strength, 2))
         self.wetness_rate = round(wetness_strength, 2)
         # self.timeofday = int(timeofday_strength)
 
         # print("new z_position {}, npc_speed {}".format(self.z_position, self.npc_speed))
+        
+        # create a categorical distribution over the list of probabilities of actions
+        m = Categorical(action_probs)
+        # and sample an action using the distribution
+        action = m.sample()
 
         # save to action buffer
-        model.saved_actions.append(SavedAction(action_probs, state_value))
+        model.saved_actions.append(SavedAction(m.log_prob(action_probs), state_value))
         # return action_probs
         return action_probs
 
     def sample_waypoint(self):
         '''sample a waypoint that depends on self.z_position'''
-        self.y_position += 0.11
+        self.y_position += 0.2
 
         position = lgsvl.Vector(13.81, self.y_position, self.z_position)
 
@@ -307,9 +318,10 @@ class Scenario():
 
         # start simulator, set up environment, connect to bridge
         self.set_environment()
-        print("finished setting environment")
         self.connect2bridge()
-        print("connected")
+        print("Finished setting the environment. Connected to bridge.")
+        if i_episode == 1:
+            input("Set waypoint through UI. Enter to continue.")
 
         state = torch.FloatTensor([ self.z_position,
                                     self.npc_speed,
@@ -327,7 +339,7 @@ class Scenario():
             # print("state {}".format(state))
 
             # select action from policy
-            action_probs = self.update_state(state)
+            action_probs = self.update_state(state, i_episode)
             state = torch.FloatTensor([ self.z_position,
                                         self.npc_speed,
                                         self.rain_rate,
@@ -360,27 +372,26 @@ class Scenario():
         # log results
         if i_episode % args.log_interval == 0:
             with open("ac-log.txt", "a+") as logfile:
-                logfile.write("   {} \t\t  {:.2f}\t\t\t{:.2f}\t\t{}\t\t{}\t{}\t{}\t{}\n".format(  i_episode,
-                                                                                            ep_reward,
-                                                                                            running_reward,
-                                                                                            [round(prob.tolist(), 3) for prob in action_probs],
-                                                                                            self.rain_rate,
-                                                                                            self.fog_rate,
-                                                                                            self.wetness_rate,
-                                                                                            # self.timeofday,
-                                                                                            self.collided))
+                logfile.write("   {} \t\t  {:.2f}\t\t\t{:.2f}\t\t{}\t{}\n".format(
+                                                                                i_episode,
+                                                                                ep_reward,
+                                                                                running_reward,
+                                                                                action_probs.tolist(),                                                                                # self.timeofday,
+                                                                                self.collided))
 
 
 sim = lgsvl.Simulator(os.environ.get("SIMULATOR_HOST", "127.0.0.1"), 8181)
 
 if __name__ == '__main__':
-    # remove if exists
+    # remove logfile if it already exists
     try:
         os.remove("ac-log.txt")
     except:
         pass
+    # Titles of logging messages
     with open("ac-log.txt", "a+") as logfile:
-        logfile.write("Episode\tEpisode cum reward\tAvg running reward\train\tact_prb\tfog\twetness\tcollided\n")
+        logfile.write("Episode\tEpisode cum reward\tAvg running reward\tact_prb\tcollided\n")
+    # Initial reward
     running_reward = 10
     num_episodes = 50
     episode_counter = 1
@@ -389,3 +400,4 @@ if __name__ == '__main__':
         scenario.main(episode_counter)
         print("Finished episode {}\n\n".format(episode_counter))
         episode_counter += 1
+        gc.collect()
