@@ -75,6 +75,12 @@ class Policy(nn.Module):
 
 
 model = Policy()
+
+# try:
+#     model.load_state_dict(torch.load('ACmodel.pt'))
+#     print("Using previously saved model weights")
+# except:
+#     print("Not using previous weights")
 optimizer = optim.Adam(model.parameters(), lr=3e-2)
 eps = np.finfo(np.float32).eps.item()
 torch.autograd.set_detect_anomaly(True)
@@ -195,7 +201,7 @@ class Scenario():
             self.npc_speed = speed_strength*10
 
         self.rain_rate = round(rain_strength, 2)
-        self.fog_rate = min(0.5, round(fog_strength, 2))
+        self.fog_rate = round(fog_strength, 2)
         self.wetness_rate = round(wetness_strength, 2)
         # self.timeofday = int(timeofday_strength)
 
@@ -297,6 +303,8 @@ class Scenario():
         # reset rewards and action buffer
         del model.rewards[:]
         del model.saved_actions[:]
+        torch.save(model.state_dict(), 'ACmodel.pth')
+
 
     def run_simulator(self):
         # runtime = 10
