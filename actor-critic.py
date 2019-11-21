@@ -213,7 +213,7 @@ class Scenario():
         action = m.sample()
 
         # save to action buffer
-        model.saved_actions.append(SavedAction(m.log_prob(action_probs), state_value))
+        model.saved_actions.append(SavedAction(m.log_prob(action), state_value))
         # return action_probs
         return action_probs
 
