@@ -70,7 +70,7 @@ class Policy(nn.Module):
         # actor
         x_a = self.action_layer1(x)
         x_a = self.action_layer2(x_a)
-        action_prob = F.softmax(x_a, dim=-1)
+        action_prob = x_a#F.softmax(x_a, dim=-1)
         # critic
         x_c = self.value_layer1(x)
         state_values = self.value_layer2(x_c)
@@ -107,6 +107,7 @@ class Scenario():
         self.y_position = -3.15
         self.npc_speed = 7
         self.collided = False
+        self.num_waypoints = 13
 
     def set_environment(self):
         '''start simulator, spawn EGO and NPC'''
@@ -161,11 +162,14 @@ class Scenario():
         # Control this traffic light with a new control policy
         signal.control(control_policy)
 
-        self.z_position = sz
-        self.final_z = spawns[0].position.x
-        print("Z positions: Initial {}, Final {}".format(self.z_position, self.final_z))
-        #sample 30 waypoints uniformly
-        self.uniform_waypoints = self.sample_uniform_waypoints(self.final_z, self.z_position, 30)
+        self.z_position = 54
+        self.final_z = -45
+        # pdb.set_trace()
+        # print("Z positions: Initial {}, Final {}".format(self.z_position, self.final_z))
+        # sample self.num_waypoints uniformly
+        self.uniform_waypoints = self.sample_uniform_waypoints(self.final_z,
+                                                               self.z_position,
+                                                               self.num_waypoints)
 
     def connect2bridge(self):
         # An EGO will not connect to a bridge unless commanded to
@@ -193,8 +197,8 @@ class Scenario():
     def update_state2(self, state, i_episode):
         '''Only handle the speed'''
         action_probs, state_value = model(state)
-        print("action_probs ", action_probs)
-        self.npc_speed = 10 * action_probs[0].item()
+        self.npc_speed = abs(action_probs[0].item())
+        print(self.npc_speed)
 
         m = Categorical(action_probs)
         # and sample an action using the distribution
@@ -213,7 +217,7 @@ class Scenario():
 
         u_waypoints = []
         for i in range(n):
-            self.y_position += 0.08
+            self.y_position += 0.14
             position = lgsvl.Vector(13.81, self.y_position, z_locations[i])
             waypoint = lgsvl.DriveWaypoint(position=position,
                                        angle=lgsvl.Vector(0, 180, 0),
@@ -299,7 +303,6 @@ class Scenario():
         '''
         run and render simulator until NPC reaches its next waypoint or collides with EGO
         '''
-        pdb.set_trace()
         while abs(waypoint.position.z-self.npc.state.position.z) > 1 and self.collided==False:
             self.sim.run(1)
 
@@ -316,7 +319,7 @@ class Scenario():
         if i_episode == 1:
             input("Set waypoint through UI. Enter to continue.")
 
-        state = torch.FloatTensor([self.npc_speed])
+        state = torch.FloatTensor([self.npc.state.position.z])
 
         # reset episode reward
         ep_reward = 0
@@ -324,13 +327,15 @@ class Scenario():
 
         done = False
         iteration = 1
-        while True:
+        while iteration < self.num_waypoints:
             print("Iteration# ", iteration)
             # select action from policy
             action_probs = self.update_state2(state, i_episode)
-            state = torch.FloatTensor([self.npc_speed])
+            state = torch.FloatTensor([self.npc.state.position.z])
 
             waypoint = self.uniform_waypoints[iteration]
+            waypoint.speed = self.npc_speed
+
             reward, done = self.step(waypoint)
 
             self.run_simulator(waypoint)
