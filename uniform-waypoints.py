@@ -26,6 +26,12 @@ import random
 
 import pdb
 
+torch.manual_seed(0)
+np.random.seed(0)
+
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+print("Using ", device)
+
 parser = argparse.ArgumentParser(description='lgsvl actor-critic')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
                     help='discount factor (default: 0.99)')
@@ -44,18 +50,33 @@ class Policy(nn.Module):
     """
     implements both actor and critic in one model
     """
-
     def __init__(self):
         super(Policy, self).__init__()
         self.affine1 = nn.Linear(1, 128)
 
         # actor's layer - chooses probability strengths for the variables
-        self.action_layer1 = nn.Linear(128, 128)
-        self.action_layer2 = nn.Linear(128, 1)
+        self.actor_layer1 = nn.Linear(128, 128)
+        self.actor_layer2 = nn.Linear(128, 1)
 
         # critic's layer - evaluates being in current state
         self.value_layer1 = nn.Linear(128, 128)
         self.value_layer2 = nn.Linear(128, 1)
+
+        # Load previously saved model weights
+        try:
+            affine1_weights = np.load("weights/affine1.npy", allow_pickle=True)
+            actor1_weights = np.load("weights/actor_1.npy", allow_pickle=True)
+            actor2_weights = np.load("weights/actor_2.npy", allow_pickle=True)
+            value1_weights = np.load("weights/value_1.npy", allow_pickle=True)
+            value2_weights = np.load("weights/value_2.npy", allow_pickle=True)
+
+            self.affine1.weight.data = torch.tensor(affine1_weights)
+            self.actor_layer1.weight.data = torch.tensor(actor1_weights)
+            self.actor_layer2.weight.data = torch.tensor(actor2_weights)
+            self.value_layer1.weight.data = torch.tensor(value1_weights)
+            self.value_layer2.weight.data = torch.tensor(value2_weights)
+        except:
+            print("Not using previous weights.")
 
         # action & reward buffer
         self.saved_actions = []
@@ -68,8 +89,8 @@ class Policy(nn.Module):
         x = F.relu(self.affine1(x))
 
         # actor
-        x_a = self.action_layer1(x)
-        x_a = self.action_layer2(x_a)
+        x_a = self.actor_layer1(x)
+        x_a = self.actor_layer2(x_a)
         action_prob = x_a#F.softmax(x_a, dim=-1)
         # critic
         x_c = self.value_layer1(x)
@@ -81,14 +102,9 @@ class Policy(nn.Module):
         return action_prob, state_values
 
 
-model = Policy()
+model = Policy().to(device)
 
-# try:
-#     model.load_state_dict(torch.load('ACmodel.pt'))
-#     print("Using previously saved model weights")
-# except:
-#     print("Not using previous weights")
-optimizer = optim.Adam(model.parameters(), lr=3e-2)
+optimizer = optim.Adam(model.parameters(), lr=0.05)
 eps = np.finfo(np.float32).eps.item()
 torch.autograd.set_detect_anomaly(True)
 
@@ -100,9 +116,9 @@ class Scenario():
         self.ego = None
         self.npc = None
         self.z_position = None
-        self.rain_rate = 0
-        self.fog_rate = 0
-        self.wetness_rate = 0
+        # self.rain_rate = 0
+        # self.fog_rate = 0
+        # self.wetness_rate = 0
         # self.timeofday = random.randrange(25)
         self.y_position = -3.15
         self.npc_speed = 7
@@ -196,6 +212,7 @@ class Scenario():
 
     def update_state2(self, state, i_episode):
         '''Only handle the speed'''
+        state = state.to(device)
         action_probs, state_value = model(state)
         self.npc_speed = abs(action_probs[0].item())
         print(self.npc_speed)
@@ -217,7 +234,7 @@ class Scenario():
 
         u_waypoints = []
         for i in range(n):
-            self.y_position += 0.14
+            self.y_position += 0.145
             position = lgsvl.Vector(13.81, self.y_position, z_locations[i])
             waypoint = lgsvl.DriveWaypoint(position=position,
                                        angle=lgsvl.Vector(0, 180, 0),
@@ -281,7 +298,7 @@ class Scenario():
             policy_losses.append(-action_prob * advantage)
 
             # calculate critic (value) loss using L1 smooth loss
-            value_losses.append(F.smooth_l1_loss(value, torch.tensor([R])))
+            value_losses.append(F.smooth_l1_loss(value, torch.tensor([R]).to(device)))
 
         # reset gradients
         optimizer.zero_grad()
@@ -296,8 +313,6 @@ class Scenario():
         # reset rewards and action buffer
         del model.rewards[:]
         del model.saved_actions[:]
-        # torch.save(model.state_dict(), 'ACmodel.pth')
-
 
     def run_simulator(self, waypoint):
         '''
@@ -327,6 +342,9 @@ class Scenario():
 
         done = False
         iteration = 1
+
+        episode_avg_speed = 0
+
         while iteration < self.num_waypoints:
             print("Iteration# ", iteration)
             # select action from policy
@@ -335,6 +353,11 @@ class Scenario():
 
             waypoint = self.uniform_waypoints[iteration]
             waypoint.speed = self.npc_speed
+            episode_avg_speed += self.npc_speed
+
+            # Takes a long time to end iteration if too slow
+            if self.npc_speed<1:
+                break
 
             reward, done = self.step(waypoint)
 
@@ -354,30 +377,36 @@ class Scenario():
         # perform backprop
         self.finish_episode()
 
+        episode_avg_speed = np.round(episode_avg_speed/iteration,3)
+
         # log results
         if i_episode % args.log_interval == 0:
             with open("ac-log.txt", "a+") as logfile:
-                logfile.write("   {} \t\t  {:.2f}\t\t\t{:.2f}\t\t{}\t{}\n".format(
-                                                                                i_episode,
-                                                                                ep_reward,
-                                                                                running_reward,
-                                                                                action_probs.tolist(),                                                                                # self.timeofday,
-                                                                                self.collided))
+                logfile.write("   {}\t\t{:.2f}\t\t{:.2f}\t{} \t{}\n".format(
+                                                    i_episode,
+                                                    ep_reward,
+                                                    running_reward,
+                                                    episode_avg_speed,
+                                                    self.collided))
+        
+        # Save model weights
+        if i_episode%5==0:
+            np.save("weights/affine1.npy", model.affine1.weight.data.cpu())
+            np.save("weights/actor_1.npy", model.actor_layer1.weight.data.cpu())
+            np.save("weights/actor_2.npy", model.actor_layer2.weight.data.cpu())
+            np.save("weights/value_1.npy", model.value_layer1.weight.data.cpu())
+            np.save("weights/value_2.npy", model.value_layer2.weight.data.cpu())
 
 sim = lgsvl.Simulator(os.environ.get("SIMULATOR_HOST", "127.0.0.1"), 8181)
 
 if __name__ == '__main__':
-    # remove logfile if it already exists
-    try:
-        os.remove("ac-log.txt")
-    except:
-        pass
     # Titles of logging messages
     with open("ac-log.txt", "a+") as logfile:
-        logfile.write("Episode\tEpisode cum reward\tAvg running reward\tact_prb\tcollided\n")
+        logfile.write("Episode\tEpisode-reward\trunning-reward\tspeed\tcollided\n")
+    
     # Initial reward
     running_reward = 10
-    num_episodes = 50
+    num_episodes = 70
     episode_counter = 1
     while episode_counter <= num_episodes:
         scenario = Scenario(sim)
