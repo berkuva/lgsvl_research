@@ -26,8 +26,8 @@ import random
 
 import pdb
 
-torch.manual_seed(0)
-np.random.seed(0)
+torch.manual_seed(1)
+np.random.seed(1)
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print("Using ", device)
@@ -56,7 +56,7 @@ class Policy(nn.Module):
 
         # actor's layer - chooses probability strengths for the variables
         self.actor_layer1 = nn.Linear(128, 128)
-        self.actor_layer2 = nn.Linear(128, 1)
+        self.actor_layer2 = nn.Linear(128, 2)
 
         # critic's layer - evaluates being in current state
         self.value_layer1 = nn.Linear(128, 128)
@@ -75,8 +75,11 @@ class Policy(nn.Module):
             self.actor_layer2.weight.data = torch.tensor(actor2_weights)
             self.value_layer1.weight.data = torch.tensor(value1_weights)
             self.value_layer2.weight.data = torch.tensor(value2_weights)
+
+            print("Using pretrained weights.")
         except:
-            print("Not using previous weights.")
+            # print("Not using previous weights.")
+            pass
 
         # action & reward buffer
         self.saved_actions = []
@@ -90,8 +93,9 @@ class Policy(nn.Module):
 
         # actor
         x_a = self.actor_layer1(x)
+        x_a = F.relu(x_a)
         x_a = self.actor_layer2(x_a)
-        action_prob = x_a#F.softmax(x_a, dim=-1)
+        action_prob = F.softmax(x_a, dim=-1)
         # critic
         x_c = self.value_layer1(x)
         state_values = self.value_layer2(x_c)
@@ -104,9 +108,32 @@ class Policy(nn.Module):
 
 model = Policy().to(device)
 
-optimizer = optim.Adam(model.parameters(), lr=0.05)
+optimizer = optim.Adam(model.parameters(), lr=0.1)
 eps = np.finfo(np.float32).eps.item()
 torch.autograd.set_detect_anomaly(True)
+
+
+def sample_uniform_waypoints(start, end, n):
+    '''Uniformly sample n waypoints from start to end '''
+    z_locations = np.random.uniform(low=start, high=end, size=n)
+    z_locations.sort()
+    z_locations = np.flip(z_locations)
+
+    y_position = -3.15
+    u_waypoints = []
+    for i in range(n):
+        if i < 5:
+            y_position += 0.28
+        else:
+            y_position += 0.08
+        position = lgsvl.Vector(13.81, y_position, z_locations[i])
+        waypoint = lgsvl.DriveWaypoint(position=position,
+                                   angle=lgsvl.Vector(0, 180, 0),
+                                   speed=0)
+        u_waypoints.append(waypoint)
+    return u_waypoints
+
+UNIFORM_WAYPOINTS = sample_uniform_waypoints(-45, 25, 15)
 
 
 class Scenario():
@@ -121,9 +148,9 @@ class Scenario():
         # self.wetness_rate = 0
         # self.timeofday = random.randrange(25)
         self.y_position = -3.15
-        self.npc_speed = 7
+        self.npc_speed = 6.5
         self.collided = False
-        self.num_waypoints = 13
+        self.num_waypoints = 15
 
     def set_environment(self):
         '''start simulator, spawn EGO and NPC'''
@@ -148,7 +175,7 @@ class Scenario():
         ###################### NPC ######################
         sx = spawns[0].position.x - 8
         sy = spawns[0].position.y
-        sz = spawns[0].position.z + 100
+        sz = spawns[0].position.z + 72
 
         state = lgsvl.AgentState()
         state.transform = spawns[0]
@@ -164,6 +191,7 @@ class Scenario():
             self.ego: "EGO",
             self.npc: "Sedan",
         }
+
         self.ego.on_collision(self.on_collision)
         self.npc.on_collision(self.on_collision)
 
@@ -178,14 +206,7 @@ class Scenario():
         # Control this traffic light with a new control policy
         signal.control(control_policy)
 
-        self.z_position = 54
-        self.final_z = -45
-        # pdb.set_trace()
-        # print("Z positions: Initial {}, Final {}".format(self.z_position, self.final_z))
-        # sample self.num_waypoints uniformly
-        self.uniform_waypoints = self.sample_uniform_waypoints(self.final_z,
-                                                               self.z_position,
-                                                               self.num_waypoints)
+        self.uniform_waypoints = UNIFORM_WAYPOINTS
 
     def connect2bridge(self):
         # An EGO will not connect to a bridge unless commanded to
@@ -206,42 +227,28 @@ class Scenario():
         print("############{} collided with {}############".format(name1, name2))
 
     def on_waypoint(self, agent, index):
-        pass
-        # print("=======")
         # print("waypoint {} reached".format(index))
+        pass
 
-    def update_state2(self, state, i_episode):
+    def update_state2(self, state):
         '''Only handle the speed'''
         state = state.to(device)
         action_probs, state_value = model(state)
-        self.npc_speed = abs(action_probs[0].item())
-        print(self.npc_speed)
 
         m = Categorical(action_probs)
-        # and sample an action using the distribution
+
         action = m.sample()
+        action_number = action.item()
+        if action_number == 1:
+            self.npc_speed = action_probs[1].item()*10
+        else:
+            self.npc_speed = -action_probs[0].item()*10
+        # print(self.npc_speed)
 
         # save to action buffer
         model.saved_actions.append(SavedAction(m.log_prob(action), state_value))
         # return action_probs
         return action_probs
-
-    def sample_uniform_waypoints(self, start, end, n):
-        '''Uniformly sample n waypoints from start to end '''
-        z_locations = np.random.uniform(low=start, high=end, size=n)
-        z_locations.sort()
-        z_locations = np.flip(z_locations)
-
-        u_waypoints = []
-        for i in range(n):
-            self.y_position += 0.145
-            position = lgsvl.Vector(13.81, self.y_position, z_locations[i])
-            waypoint = lgsvl.DriveWaypoint(position=position,
-                                       angle=lgsvl.Vector(0, 180, 0),
-                                       speed=self.npc_speed)
-            u_waypoints.append(waypoint)
-        return u_waypoints
-
 
     def step(self, waypoint):
         '''
@@ -305,7 +312,7 @@ class Scenario():
 
         # sum up all the values of policy_losses and value_losses
         loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
-
+            
         # perform backprop
         loss.backward()
         optimizer.step()
@@ -316,12 +323,12 @@ class Scenario():
 
     def run_simulator(self, waypoint):
         '''
-        run and render simulator until NPC reaches its next waypoint or collides with EGO
+        render simulator
         '''
-        while abs(waypoint.position.z-self.npc.state.position.z) > 1 and self.collided==False:
-            self.sim.run(1)
+        self.sim.run(1)
 
     def main(self, i_episode):
+        # for i in range(1):
         global running_reward
 
         # run episodes
@@ -348,18 +355,31 @@ class Scenario():
         while iteration < self.num_waypoints:
             print("Iteration# ", iteration)
             # select action from policy
-            action_probs = self.update_state2(state, i_episode)
+            action_probs = self.update_state2(state)
             state = torch.FloatTensor([self.npc.state.position.z])
 
             waypoint = self.uniform_waypoints[iteration]
-            waypoint.speed = self.npc_speed
+
+            # If velocity is negative, move backwards
+            if self.npc_speed < 0:
+                waypoint.position.z -= self.npc_speed
+                waypoint.speed = -self.npc_speed
+                # prohibit floating of NPC
+                if iteration < 5:
+                    waypoint.position.y -= 0.56
+                else:
+                    waypoint.position.y -= 0.16
+            else:
+                waypoint.speed = self.npc_speed
+
             episode_avg_speed += self.npc_speed
 
-            # Takes a long time to end iteration if too slow
-            if self.npc_speed<1:
-                break
-
             reward, done = self.step(waypoint)
+
+            if self.npc_speed < 0:
+                #shift following waypoints by 1. Last waypoint is copied over to keep length of array
+                self.uniform_waypoints.append(self.uniform_waypoints[-1])
+                self.uniform_waypoints[iteration:] = self.uniform_waypoints[iteration+1:]
 
             self.run_simulator(waypoint)
 
@@ -388,7 +408,7 @@ class Scenario():
                                                     running_reward,
                                                     episode_avg_speed,
                                                     self.collided))
-        
+
         # Save model weights
         if i_episode%5==0:
             np.save("weights/affine1.npy", model.affine1.weight.data.cpu())
